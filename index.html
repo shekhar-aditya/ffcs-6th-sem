@@ -250,6 +250,7 @@ table.lk tr:hover td{background:#111a2e}
     <button class="tab" data-view="cat">View 2: All Possible Trees Catalog</button>
     <button class="tab" data-view="hud">Live HUD Mode</button>
     <button class="tab" id="btnCC">Control Center</button>
+    <button class="tab" id="btnAdd" title="Add a course from VTOP or delete courses">＋ Add / Delete Courses</button>
   </div>
   <div id="gauge" title="Credits in the timetable currently shown on the right">
     <span id="gaugeTxt">Credits: 0.0 / 27.5</span><div class="bar"><i id="gaugeBar"></i></div>
@@ -1346,7 +1347,8 @@ function scheduleText(units, title) {
 let CC = 'queue';
 function openCC() { $('#modal').classList.add('on'); renderCC(); }
 function closeCC() { $('#modal').classList.remove('on'); S.preview = null; refreshTT(); }
-$('#btnCC').onclick = openCC; $('#mclose').onclick = closeCC;
+$('#btnCC').onclick = openCC;
+$('#btnAdd').onclick = () => { CC = 'crs'; ADDF.open = true; openCC(); const t = $('#addPaste'); if (t) t.focus(); }; $('#mclose').onclick = closeCC;
 document.querySelectorAll('[data-cc]').forEach(b => b.onclick = () => { CC = b.dataset.cc; renderCC(); });
 function renderCC() {
   document.querySelectorAll('[data-cc]').forEach(b => b.classList.toggle('on', b.dataset.cc === CC));
