@@ -239,6 +239,34 @@ table.lk tr:hover td{background:#111a2e}
   .sch{grid-template-columns:64px 1fr}
   .sch .meta{display:none}
 }
+/* ---------- accounts ---------- */
+#acct{position:relative;flex:none}
+#acctBtn{display:flex;align-items:center;gap:7px;background:#18213a;border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12.5px;font-weight:700;color:var(--text);white-space:nowrap}
+#acctBtn .dot{width:7px;height:7px;border-radius:50%;background:#64748b}
+#acctBtn .dot.ok{background:#10b981}#acctBtn .dot.busy{background:#eab308}#acctBtn .dot.err{background:#ef4444}
+#acctMenu{display:none;position:absolute;right:0;top:calc(100% + 6px);min-width:230px;background:#0d1322;border:1px solid var(--border);border-radius:10px;padding:6px;z-index:60;box-shadow:0 10px 30px #0008}
+#acctMenu.on{display:block}
+#acctMenu .who{padding:6px 8px 8px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);margin-bottom:4px}
+#acctMenu .who b{color:var(--text);font-size:13px}
+#acctMenu button{display:block;width:100%;text-align:left;background:none;border:0;border-radius:6px;padding:7px 8px;font-size:12.5px;color:var(--text)}
+#acctMenu button:hover{background:#18213a}
+.ovl{position:fixed;inset:0;background:#02060ce6;display:none;align-items:center;justify-content:center;z-index:90}
+.ovl.on{display:flex}
+.acard{width:min(400px,92vw);background:#0d1322;border:1px solid var(--border);border-radius:14px;padding:22px}
+.acard h2{margin:0 0 4px;font-size:18px}.acard h2 b{color:var(--primary)}
+.acard label{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}
+.acard input[type=text],.acard input[type=password]{width:100%;box-sizing:border-box;font-size:14px;padding:9px 10px}
+.acard .err{color:#fca5a5;font-size:12.5px;min-height:18px;margin-top:10px}
+.acard .btn{padding:8px 14px;font-size:13px}
+#admBox{width:min(1040px,95vw);height:min(740px,92vh);background:#0d1322;border:1px solid var(--border);border-radius:14px;display:flex;flex-direction:column;overflow:hidden}
+#admHead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border)}
+#admHead h2{margin:0 10px 0 0;font-size:15px}
+#admBody{flex:1;overflow:auto;padding:14px}
+#admBody table.lk input[type=text]{width:100%;min-width:90px;box-sizing:border-box}
+#admBody .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.tgtl{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px;margin:8px 0 12px}
+.tgtl label{display:flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:12.5px;background:#111a2e}
+.tgtl label small{color:var(--muted);display:block;font-size:11px}
 </style>
 </head>
 <body>
@@ -329,6 +357,12 @@ table.lk tr:hover td{background:#111a2e}
 </div></div>
 <div id="toast"></div>
 
+<script>
+/* Accounts: a signed-in user's planner state is cached under their own key and synced to /api/ffcs.
+   The pre-accounts key 'ffcsstrat.v3' is never written again — it is only read to offer a one-time import. */
+const ACCT = (() => { try { const a = JSON.parse(localStorage.getItem('ffcs.session') || 'null'); return a && a.token && a.user ? a : null; } catch (e) { return null; } })();
+window.FFCS_LS = ACCT ? 'ffcsstrat.v3.u.' + ACCT.user.id : 'ffcsstrat.v3.guest';
+</script>
 <script>
 /* ===== FFCS CORE: data model, clash masks, 3-tier solver, lookahead (DOM-free) ===== */
 const DEF_CAP = 27.5, DEF_MIN = 21.0, PERIODS = 14, NDAYS = 5;
@@ -701,7 +735,7 @@ const S = {
 /* ---------- persistence (never required to render) ----------
    Sections are stored by signature (course|faculty|slots), never by array index, so a rebuilt
    data file with reordered or added rows cannot silently remap a saved choice onto another section. */
-const LS = 'ffcsstrat.v3', LS_OLD = 'ffcsstrat.v2';
+const LS = window.FFCS_LS || 'ffcsstrat.v3', LS_OLD = 'ffcsstrat.v2';
 /* Built-in faculty tags and priority queue: used when this browser has nothing saved yet (e.g. first visit to the deployed site). */
 const SEED_ID = 1;   // bump when SEED changes so browsers saved before it pick up the new tags
 const SEED = {"tags":{"KANNADASAN R":"g","SELVI M":"g","ADRIJA BHATTACHARYA":"g","BHAWANA TYAGI":"g","BALAJI N":"g","BAIJU B V":"g","DILIPKUMAR S":"g","DURGESH KUMAR":"b","ISLABUDEEN M":"b","SATHYARAJ R":"m","ANAND BIHARI":"b","ARPITA GHOSH":"g","AVISHEK NANDI":"g","BANUPRIYA R":"b","BERLIN M A":"g","PRABIN S M":"m","NITHYA N S":"g","UMADEVI K S":"b","AJU D":"m","ANISHA M. LAL":"m","ANNY LEEMA A":"m","ANTO S":"m","ANURADHA G":"b","BHUVANESWARI M":"g","DEEPA D":"g","DHEEBA J":"g","JAYA SUBALAKSHMI R":"m","JAYAKUMAR S":"g","JAYASHREE J":"g","JOSHVA DEVADAS T":"b","KARTHIKA M S":"m","KRISHNAMOORTHY A":"m","MADHU VISWANATHAM V":"m","MALATHI M":"m","MANJULA R":"m","MOHAN KUMAR P":"b","MURUGAN K":"m","MYTHILI T":"b","NARAYANAMOORTHI M":"g","NARESH K":"m","NATARAJAN P":"g","NAVAMANI T M":"b","PARTHIBAN K":"m","RAJAKUMAR K":"g","RAMANATHAN L":"b","RAMANI S":"g","RAMESH BABU K":"b","RUBY D":"b","SANTHI H":"b","SARWESH P":"g","SOMASUNDARAM S K":"m","SREETHAR S":"m","SUDARSHAN NANDY":"g","USHUS ELIZEBETH ZACHARIAH":"m","YOKESH BABU S":"b"},"queue":["ACC","PHY","EDA","SLP","PA","IOT","FEC","WC","SC","PIOT","IS","DP","WAS","MAL","DF","DWM","FBT","BTC","BCA","SCT","CRY","DLT","PKI","XAI","DL","RL","MV","FDS","PC","PDS","DM","CC","PT","DIP","CV","ML","EMB","CNS","SE"],"course":{},"limits":null,"fbCount":4,"live":true,"state":{"committed":{},"banned":[],"dropped":{}},"order":[],"history":[]};
@@ -717,9 +751,11 @@ function save() {
       seed: SEED_ID, tags: PREF.tags, queue: PREF.queue, course: PREF.course, limits: PREF.limits, added: PREF.added, deleted: PREF.deleted, fbCount: S.fbCount, live: S.cat.live,
       state: { committed, banned, dropped: st.dropped }, order: S.order, history
     }));
+    if (window.acctSaved) acctSaved();
   } catch (e) { }
 }
 function readSaved() {
+  if (ACCT) { try { return JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) { return null; } }
   try {
     const j = JSON.parse(localStorage.getItem(LS) || 'null');
     // only fill an empty tag set: never replace tags someone already made in this browser
@@ -1568,6 +1604,252 @@ buildTTSkeleton();
 loadState();
 recalc('init');
 window.addEventListener('resize', () => { if (S.view === 'cat') paintCatalog(); });
+</script>
+<script>
+/* ===================================================================================
+   ACCOUNTS — sign-in gate, per-user sync, one-time import of pre-accounts browser data, admin panel
+   =================================================================================== */
+(function () {
+  const OLD_LS = 'ffcsstrat.v3';   // pre-accounts browser data: read-only from here on
+  const uid = ACCT && ACCT.user.id;
+  const K = uid ? { rev: 'ffcs.rev.' + uid, synced: 'ffcs.synced.' + uid, migr: 'ffcs.migr.' + uid } : {};
+  const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { } };
+  const lsDel = k => { try { localStorage.removeItem(k); } catch (e) { } };
+
+  async function api(action, body, opts) {
+    let r;
+    try {
+      r = await fetch('/api/ffcs', Object.assign({
+        method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, ACCT ? { Authorization: 'Bearer ' + ACCT.token } : {}),
+        body: JSON.stringify(Object.assign({ action }, body || {}))
+      }, opts || {}));
+    } catch (e) { throw new Error('Cannot reach the account server — check your connection'); }
+    let j = null; try { j = await r.json(); } catch (e) { }
+    if (!r.ok || !j) {
+      if (r.status === 401 && ACCT && action !== 'login') { lsDel('ffcs.session'); location.reload(); }
+      throw new Error((j && j.error) || (r.status === 404 || r.status === 501 || r.status === 405 ? 'Account server not available here — open the deployed site' : 'Server error ' + r.status));
+    }
+    return j;
+  }
+
+  /* ---------- sign-in gate ---------- */
+  document.body.insertAdjacentHTML('beforeend',
+    '<div class="ovl" id="gate"><form class="acard" id="gateForm" autocomplete="on"><h2>FFCS<b>STRAT</b> · Sign in</h2>' +
+    '<div class="note" style="margin:0">Your faculty tags, courses and plan are saved to your own account.</div>' +
+    '<label for="gLogin">Login ID</label><input type="text" id="gLogin" autocomplete="username" autocapitalize="none" spellcheck="false" required>' +
+    '<label for="gPw">Password</label><input type="password" id="gPw" autocomplete="current-password" required>' +
+    '<div class="err" id="gErr"></div><button class="btn pri" type="submit" style="width:100%">Sign in</button></form></div>' +
+    '<div class="ovl" id="migr"><div class="acard" style="width:min(480px,92vw)"><h2>Import this browser\'s data?</h2><div class="note" id="migrTxt"></div>' +
+    '<div style="display:flex;gap:8px;margin-top:14px"><button class="btn pri" id="migrYes">Import into my account</button><button class="btn" id="migrNo">Not now</button></div></div></div>' +
+    '<div class="ovl" id="adm"><div id="admBox"><div id="admHead"><h2>Admin · Users &amp; faculty tag distribution</h2>' +
+    '<button class="tab on" data-adm="users">Users &amp; access</button><button class="tab" data-adm="dist">Faculty tag distribution</button>' +
+    '<button class="btn" id="admClose" style="margin-left:auto">Close</button></div><div id="admBody"></div></div></div>');
+
+  if (!ACCT) {
+    $('#gate').classList.add('on'); setTimeout(() => $('#gLogin').focus(), 50);
+    $('#gateForm').onsubmit = async e => {
+      e.preventDefault(); $('#gErr').textContent = 'Signing in…';
+      try {
+        const r = await api('login', { login: $('#gLogin').value, password: $('#gPw').value });
+        lsSet('ffcs.session', JSON.stringify({ token: r.token, user: r.user })); location.reload();
+      } catch (err) { $('#gErr').textContent = err.message; }
+    };
+    return;
+  }
+
+  /* ---------- account menu in the top bar ---------- */
+  $('#nav').insertAdjacentHTML('beforeend', '<div id="acct"><button id="acctBtn" title="Account"><span class="dot" id="acctDot"></span><span id="acctName"></span> ▾</button><div id="acctMenu"></div></div>');
+  function paintMenu() {
+    const u = ACCT.user, old = lsGet(OLD_LS);
+    $('#acctName').textContent = u.name + (u.admin ? ' · Admin' : '');
+    $('#acctMenu').innerHTML = '<div class="who"><b>' + esc(u.name) + '</b><br>' + esc(u.login) + (u.admin ? ' · administrator' : '') + '<br><span id="acctSync">' + esc(syncMsg) + '</span></div>' +
+      (u.admin ? '<button data-a="admin">🛡 Admin panel</button>' : '') +
+      (old ? '<button data-a="import">⇪ Import this browser\'s old data</button>' : '') +
+      '<button data-a="pw">🔑 Change password</button><button data-a="out">⎋ Sign out</button>';
+  }
+  let syncMsg = 'Connecting…';
+  function setSync(kind, msg) { syncMsg = msg; $('#acctDot').className = 'dot ' + kind; $('#acctBtn').title = msg; const s = $('#acctSync'); if (s) s.textContent = msg; }
+  paintMenu();
+  $('#acctBtn').onclick = e => { e.stopPropagation(); paintMenu(); $('#acctMenu').classList.toggle('on'); };
+  document.addEventListener('click', e => { if (!e.target.closest('#acct')) $('#acctMenu').classList.remove('on'); });
+  $('#acctMenu').onclick = async e => {
+    const b = e.target.closest('button[data-a]'); if (!b) return; $('#acctMenu').classList.remove('on');
+    const a = b.dataset.a;
+    if (a === 'admin') openAdmin();
+    if (a === 'import') offerImport(true);
+    if (a === 'out') { await pushNow().catch(() => { }); api('logout').catch(() => { }); [FFCS_LS, K.rev, K.synced, 'ffcs.session'].forEach(lsDel); location.reload(); }
+    if (a === 'pw') {
+      const old = prompt('Current password'); if (old == null) return;
+      const pw = prompt('New password (at least 6 characters)'); if (pw == null) return;
+      try { await api('changePassword', { old, password: pw }); toast('Password changed', 'good'); } catch (err) { toast(err.message, 'bad', 5000); }
+    }
+  };
+
+  /* ---------- sync: the server copy is the truth; local key is a cache ---------- */
+  let READY = false, pushT = null, pushing = null;
+  function adopt(rec, why) {   // replace the local cache with the server copy and restart the app on it
+    if (rec.data) lsSet(FFCS_LS, JSON.stringify(rec.data)); else lsDel(FFCS_LS);
+    lsSet(K.rev, String(rec.rev)); lsSet(K.synced, rec.data ? JSON.stringify(rec.data) : '');
+    if (why) { lsSet('ffcs.notice', why); }
+    location.reload();
+  }
+  async function pushNow() {
+    clearTimeout(pushT); if (!READY) return;
+    if (pushing) return pushing;
+    const cur = lsGet(FFCS_LS); if (!cur || cur === lsGet(K.synced)) { setSync('ok', 'All changes saved to your account'); return; }
+    setSync('busy', 'Saving…');
+    pushing = (async () => {
+      try {
+        const r = await api('putData', { data: JSON.parse(cur), baseRev: +(lsGet(K.rev) || 0) });
+        if (r.conflict) { adopt(r, 'Your account was updated elsewhere (for example an admin shared faculty tags with you) — loaded the latest version.'); return; }
+        lsSet(K.rev, String(r.rev)); lsSet(K.synced, cur); setSync('ok', 'All changes saved to your account');
+      } catch (err) { setSync('err', 'Not saved: ' + err.message); }
+      finally { pushing = null; }
+    })();
+    return pushing;
+  }
+  window.acctSaved = () => { if (!READY) return; setSync('busy', 'Unsaved changes…'); clearTimeout(pushT); pushT = setTimeout(pushNow, 800); };
+  window.addEventListener('pagehide', () => {
+    const cur = lsGet(FFCS_LS); if (!READY || !cur || cur === lsGet(K.synced)) return;
+    try { fetch('/api/ffcs', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + ACCT.token }, body: JSON.stringify({ action: 'putData', data: JSON.parse(cur), baseRev: +(lsGet(K.rev) || 0) }) }); } catch (e) { }
+  });
+
+  async function startup() {
+    let r;
+    try { r = await api('getData'); } catch (err) { setSync('err', err.message); toast(err.message, 'bad', 6000); return; }
+    ACCT.user = r.user; lsSet('ffcs.session', JSON.stringify(ACCT)); paintMenu();
+    const localRev = +(lsGet(K.rev) || 0);
+    if (r.data && r.rev !== localRev) { adopt(r); return; }                    // newer copy on the server
+    if (!r.data && localRev) { lsSet(K.rev, '0'); }
+    READY = true;
+    const n = lsGet('ffcs.notice'); if (n) { lsDel('ffcs.notice'); toast(n, 'good', 6000); }
+    if (lsGet(OLD_LS) && !lsGet(K.migr)) { offerImport(false, !r.data); return; }
+    pushNow();
+  }
+  /* pre-accounts browser data -> this account (the browser copy is left untouched) */
+  function offerImport(manual, empty) {
+    let old = null; try { old = JSON.parse(lsGet(OLD_LS) || 'null'); } catch (e) { }
+    if (!old) { if (manual) toast('No old browser data found', 'bad'); return; }
+    const st = old.state || {}, cnt = (o) => Object.keys(o || {}).length;
+    $('#migrTxt').innerHTML = 'This browser has planner data saved before accounts existed:<br><b>' + cnt(old.tags) + '</b> faculty tags · <b>' + (old.added || []).length + '</b> added course(s) · <b>' + cnt(old.deleted) + '</b> deleted course(s) · <b>' +
+      cnt(st.committed) + '</b> secured section(s) · <b>' + cnt(old.course) + '</b> course setting(s).<br><br>Import it into <b>' + esc(ACCT.user.name) + '</b>\'s account?' +
+      (empty === false || manual ? ' <span style="color:#fde68a">This replaces what is currently in your account.</span>' : '') +
+      ' The copy in this browser is kept unchanged either way.';
+    $('#migr').classList.add('on');
+    $('#migrNo').onclick = () => { lsSet(K.migr, 'skipped'); $('#migr').classList.remove('on'); pushNow(); };
+    $('#migrYes').onclick = async () => {
+      $('#migrYes').disabled = true;
+      try {
+        const cur = await api('getData');
+        const r = await api('putData', { data: old, baseRev: cur.rev });
+        if (r.conflict) throw new Error('Account changed meanwhile — try again');
+        lsSet(K.migr, 'imported'); adopt({ data: old, rev: r.rev }, 'Imported ' + cnt(old.tags) + ' faculty tags and your course data into your account.');
+      } catch (err) { $('#migrYes').disabled = false; toast(err.message, 'bad', 5000); }
+    };
+  }
+  /* pick up changes made elsewhere (e.g. tags distributed by an admin) when the tab comes back */
+  let lastCheck = Date.now();
+  document.addEventListener('visibilitychange', async () => {
+    if (document.hidden || !READY || Date.now() - lastCheck < 15000) return; lastCheck = Date.now();
+    try {
+      const r = await api('getData'), localRev = +(lsGet(K.rev) || 0);
+      ACCT.user = r.user; lsSet('ffcs.session', JSON.stringify(ACCT)); paintMenu();
+      if (r.rev !== localRev && lsGet(FFCS_LS) === lsGet(K.synced)) adopt(r, 'Your account was updated (for example an admin shared faculty tags with you) — loaded the latest version.');
+    } catch (e) { }
+  });
+
+  /* ---------- admin panel ---------- */
+  let ADM = 'users', AD = null, DSRC = '';
+  function openAdmin() { $('#adm').classList.add('on'); loadAdmin(); }
+  $('#admClose').onclick = () => $('#adm').classList.remove('on');
+  document.querySelectorAll('[data-adm]').forEach(b => b.onclick = () => { ADM = b.dataset.adm; paintAdmin(); });
+  async function loadAdmin() {
+    $('#admBody').innerHTML = '<p class="note">Loading…</p>';
+    try { AD = await api('adminList'); paintAdmin(); } catch (err) { $('#admBody').innerHTML = '<p class="note" style="color:#fca5a5">' + esc(err.message) + '</p>'; }
+  }
+  const nameOf = id => { const u = AD.users.find(x => x.id === id); return u ? u.name : '—'; };
+  const genPw = () => { const A = 'abcdefghjkmnpqrstuvwxyz23456789', r = new Uint32Array(12); crypto.getRandomValues(r); return [0, 4, 8].map(i => Array.from(r.slice(i, i + 4), x => A[x % A.length]).join('')).join('-'); };
+  const when = t => t ? new Date(t).toLocaleString() : 'never';
+  function paintAdmin() {
+    document.querySelectorAll('[data-adm]').forEach(b => b.classList.toggle('on', b.dataset.adm === ADM));
+    if (!AD) return;
+    if (ADM === 'users') {
+      $('#admBody').innerHTML = '<p class="note"><b>Users &amp; access.</b> Each person signs in with their own login ID and password. Untick <i>Access</i> to block someone from the platform (they are signed out immediately); their data is kept. Every account\'s tags, courses and plan are stored separately.</p>' +
+        '<div class="row"><input type="text" id="nuName" placeholder="Full name" style="width:170px"><input type="text" id="nuLogin" placeholder="Login ID" style="width:130px" autocapitalize="none">' +
+        '<input type="text" id="nuPw" placeholder="Password" style="width:150px"><button class="btn" id="nuGen" title="Generate a password">🎲</button><label class="lbl"><input type="checkbox" id="nuAdmin"> Admin</label><button class="btn pri" id="nuAdd">＋ Add user</button></div>' +
+        '<table class="lk"><thead><tr><th>NAME</th><th>LOGIN ID</th><th>ADMIN</th><th>ACCESS</th><th>FACULTY TAGS</th><th>LAST SAVED</th><th></th></tr></thead><tbody>' +
+        AD.users.map(u => '<tr data-id="' + esc(u.id) + '"><td><input type="text" data-f="name" value="' + esc(u.name) + '"></td><td><input type="text" data-f="login" value="' + esc(u.login) + '"></td>' +
+          '<td><input type="checkbox" data-f="admin"' + (u.admin ? ' checked' : '') + '></td><td><input type="checkbox" data-f="active"' + (u.active ? ' checked' : '') + '></td>' +
+          '<td>' + u.tags + (u.receivesFrom ? ' <span class="flag good">FROM ' + esc(nameOf(u.receivesFrom).toUpperCase()) + '</span>' : '') + '</td><td style="font-size:11.5px;color:var(--muted)">' + esc(when(u.at)) + '</td>' +
+          '<td style="white-space:nowrap"><button class="btn" data-act="save">Save</button> <button class="btn" data-act="pw">Reset password</button> ' + (u.id === ACCT.user.id ? '' : '<button class="btn danger" data-act="del">🗑</button>') + '</td></tr>').join('') + '</tbody></table>';
+      $('#nuGen').onclick = () => { $('#nuPw').value = genPw(); };
+      $('#nuAdd').onclick = async () => {
+        const body = { name: $('#nuName').value, login: $('#nuLogin').value, password: $('#nuPw').value, admin: $('#nuAdmin').checked };
+        try { await api('addUser', body); toast('Added ' + body.name + ' — login ' + body.login.trim().toLowerCase() + ' / ' + body.password, 'good', 9000); await loadAdmin(); } catch (err) { toast(err.message, 'bad', 5000); }
+      };
+      $('#admBody').onclick = async e => {
+        const b = e.target.closest('button[data-act]'); if (!b) return;
+        const tr = b.closest('tr[data-id]'), id = tr.dataset.id, u = AD.users.find(x => x.id === id), v = f => tr.querySelector('[data-f="' + f + '"]');
+        try {
+          if (b.dataset.act === 'save') {
+            await api('updateUser', { id, name: v('name').value, login: v('login').value, admin: v('admin').checked, active: v('active').checked });
+            if (id === ACCT.user.id) { const r = await api('me'); ACCT.user = r.user; lsSet('ffcs.session', JSON.stringify(ACCT)); paintMenu(); }
+            toast('Saved ' + v('name').value, 'good');
+          }
+          if (b.dataset.act === 'pw') {
+            const pw = prompt('New password for ' + u.name + ' (at least 6 characters)', genPw()); if (!pw) return;
+            await api('updateUser', { id, password: pw }); toast(u.name + '\'s new password: ' + pw, 'good', 10000);
+          }
+          if (b.dataset.act === 'del') {
+            if (!confirm('Delete ' + u.name + ' (' + u.login + ')?\nTheir account and all their saved data are removed permanently. Tags already shared from them stay with the receivers.')) return;
+            await api('deleteUser', { id }); toast('Deleted ' + u.name, 'good');
+          }
+          await loadAdmin();
+        } catch (err) { toast(err.message, 'bad', 5000); loadAdmin(); }
+      };
+    } else {
+      if (!DSRC || !AD.users.some(u => u.id === DSRC)) DSRC = (AD.users.find(u => u.tags > 0) || AD.users[0]).id;
+      const dist = AD.dist;
+      $('#admBody').innerHTML = '<p class="note"><b>Faculty tag distribution.</b> Pick whose faculty tags to share, tick who receives them, then save. Each receiver gets an independent <b>copy</b>: they can edit it freely and it never changes the source. ' +
+        'Unticking someone who was receiving from this source resets their tags to ⚪ Neutral. People who receive nothing keep their own tags (new accounts start all Neutral). Use <i>Re-send</i> to push the source\'s latest tags again (this overwrites the receivers\' edits).</p>' +
+        '<div class="row"><label class="lbl">Source <select id="dSrc">' + AD.users.map(u => '<option value="' + esc(u.id) + '"' + (u.id === DSRC ? ' selected' : '') + '>' + esc(u.name) + ' — ' + u.tags + ' tag(s)</option>').join('') + '</select></label></div>' +
+        '<div class="note" style="margin:0">Receivers of <b>' + esc(nameOf(DSRC)) + '</b>\'s tags:</div><div class="tgtl">' +
+        AD.users.filter(u => u.id !== DSRC).map(u => {
+          const from = dist[u.id];
+          return '<label><input type="checkbox" data-t="' + esc(u.id) + '"' + (from === DSRC ? ' checked' : '') + '><span>' + esc(u.name) + '<small>' +
+            (from === DSRC ? 'receiving from ' + esc(nameOf(DSRC)) : from ? 'receiving from ' + esc(nameOf(from)) + ' — ticking moves them' : 'own tags (' + u.tags + ')') + '</small></span></label>';
+        }).join('') + '</div>' +
+        '<div class="row"><button class="btn pri" id="dSave">Save distribution</button><button class="btn" id="dResend">Re-send latest tags to all ticked</button><button class="btn" id="dAll">Tick all</button><button class="btn" id="dNone">Untick all</button></div>' +
+        '<table class="lk"><thead><tr><th>USER</th><th>FACULTY TAGS COME FROM</th><th>TAGS NOW</th></tr></thead><tbody>' +
+        AD.users.map(u => '<tr><td>' + esc(u.name) + (u.admin ? ' <span class="chip cat">ADMIN</span>' : '') + '</td><td>' + (dist[u.id] ? '📥 copy of <b>' + esc(nameOf(dist[u.id])) + '</b>\'s tags (editable)' : '<span style="color:var(--muted)">own tags</span>') + '</td><td class="mono">' + u.tags + '</td></tr>').join('') + '</tbody></table>';
+      $('#dSrc').onchange = e => { DSRC = e.target.value; paintAdmin(); };
+      const ticked = () => Array.from(document.querySelectorAll('.tgtl input:checked')).map(x => x.dataset.t);
+      $('#dAll').onclick = () => document.querySelectorAll('.tgtl input').forEach(x => { x.checked = true; });
+      $('#dNone').onclick = () => document.querySelectorAll('.tgtl input').forEach(x => { x.checked = false; });
+      const send = async resend => {
+        const targets = ticked(), was = AD.users.filter(u => dist[u.id] === DSRC).map(u => u.id), drop = was.filter(t => !targets.includes(t)), moved = targets.filter(t => dist[t] && dist[t] !== DSRC);
+        const add = resend ? targets : targets.filter(t => dist[t] !== DSRC);
+        const msg = [add.length ? (resend ? 'Send' : 'Copy') + ' ' + nameOf(DSRC) + '\'s tags to: ' + add.map(nameOf).join(', ') + ' (replaces their current tags)' : '',
+          moved.length ? 'Moved from another source: ' + moved.map(nameOf).join(', ') : '',
+          drop.length ? 'Reset to all Neutral: ' + drop.map(nameOf).join(', ') : ''].filter(Boolean).join('\n');
+        if (!msg) { toast('Nothing changed', 'good'); return; }
+        if (!confirm(msg + '\n\n' + nameOf(DSRC) + '\'s own tags are not changed.')) return;
+        try {
+          await pushNow();
+          const r = await api('setDist', { source: DSRC, targets, resend });
+          toast('Sent to ' + r.sent.length + ', reset ' + r.reset.length, 'good');
+          if (r.sent.includes(ACCT.user.id) || r.reset.includes(ACCT.user.id)) { adopt(await api('getData'), 'Your faculty tags were updated from ' + nameOf(DSRC) + '.'); return; }
+          await loadAdmin();
+        } catch (err) { toast(err.message, 'bad', 5000); }
+      };
+      $('#dSave').onclick = () => send(false);
+      $('#dResend').onclick = () => send(true);
+    }
+  }
+
+  startup();
+})();
 </script>
 </body>
 </html>
