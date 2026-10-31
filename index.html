@@ -19,11 +19,14 @@ button{font:inherit;color:inherit;cursor:pointer}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 
 /* ---------- navbar ---------- */
-#nav{display:flex;align-items:center;gap:14px;padding:0 16px;height:54px;flex:none;background:#0d1322;border-bottom:1px solid var(--border)}
+#nav{display:flex;align-items:center;gap:14px;padding:6px 16px;min-height:54px;box-sizing:border-box;flex:none;background:#0d1322;border-bottom:1px solid var(--border)}
 .brand{font-weight:800;letter-spacing:.04em;font-size:15px;white-space:nowrap}
 .brand b{color:var(--primary)}
 .brand span{color:var(--muted);font-weight:600}
-#tabs{display:flex;gap:6px;margin-left:8px;flex-wrap:nowrap}
+#tabs{display:flex;gap:4px 6px;margin-left:8px;flex-wrap:wrap;flex:0 1 auto;min-width:0}
+#shiftLbl,#gauge,#acct{flex:none}
+@media (max-width:1700px){#gauge .bar{width:60px}#tabs .tab{padding:6px 9px}#nav{gap:10px}}
+@media (max-width:1450px){#gauge .bar{display:none}.brand span{display:none}}
 .tab{background:transparent;border:1px solid transparent;border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600;color:var(--muted);white-space:nowrap}
 .tab:hover{color:var(--text);background:#18213a}
 .tab.on{background:#12304a;border-color:#1d5f8a;color:#e0f2fe}
@@ -300,6 +303,7 @@ table.lk tr:hover td{background:#111a2e}
     <button class="tab" id="btnCC">Control Center</button>
     <button class="tab" id="btnAdd" title="Add a course from VTOP or delete courses">＋ Add / Delete Courses</button>
   </div>
+  <label class="lbl" id="shiftLbl" title="Applies to every view: Morning = theory before lunch with labs after; Evening = theory after lunch with labs before; Mix = any">Shift <select id="shiftSel"><option value="mix">◐ Mix</option><option value="morning">☀ Morning theory</option><option value="evening">🌙 Evening theory</option></select></label>
   <div id="gauge" title="Credits in the timetable currently shown on the right">
     <span id="gaugeTxt">Credits: 0.0 / 27.5</span><div class="bar"><i id="gaugeBar"></i></div>
   </div>
@@ -408,7 +412,8 @@ let COURSES = [], CBY = {}, UNITS = {}, MAND = [], ELEC = [];
 // queue: array of course keys once customised; course: {key: {credits, mand, off}}; limits: {min, max}
 // added: courses pasted from VTOP (same shape as DATA.courses); deleted: {key: true} for removed built-in courses
 // want: View 4 faculty requests in priority order [{ck, f: [faculty keys]}]
-const PREF = { tags: {}, queue: null, course: {}, limits: null, added: [], deleted: {}, want: [] };
+// shift: 'mix' | 'morning' (theory before lunch, labs after) | 'evening' (theory after lunch, labs before)
+const PREF = { tags: {}, queue: null, course: {}, limits: null, added: [], deleted: {}, want: [], shift: 'mix' };
 
 /* Clashes are decided on real clock time, not on timetable columns: theory and lab periods start and end at
    different minutes (TE1 11:00–11:50 overlaps L23 11:40–12:30 although they sit in different columns).
@@ -534,8 +539,36 @@ function initCore(data) {
       };
       UNITS[unit.id] = unit; return unit;
     });
+    c.allUnits = c.units;
   });
+  applyShift();
 }
+
+/* Shift preference. Electives outside the chosen shift are left out; a mandatory course keeps its other sections only
+   when it has none in the shift or the timetable cannot be completed otherwise. UNITS keeps every section, so ids
+   (and secured sections) never change. If the minimum credits cannot be reached inside the shift, the minimum is
+   lowered to the best the shift allows. */
+let SHIFT = { relaxed: [], minFrom: null };
+const unitShift = u => {
+  const theory = u.tCells.length > 0, am = (theory ? u.tCells : u.lCells).every(([, p]) => p < 6);
+  return theory ? (am ? 'morning' : 'evening') : (am ? 'evening' : 'morning');   // lab-only: morning lab = evening-theory pattern
+};
+function applyShift() {
+  SHIFT = { relaxed: [], minFrom: null };
+  const mode = PREF.shift; if (mode !== 'morning' && mode !== 'evening') return;
+  const inS = {}; COURSES.forEach(c => { inS[c.key] = c.allUnits.filter(u => unitShift(u) === mode); });
+  const relax = new Set(MAND.filter(c => !inS[c.key].length).map(c => c.key));
+  const set = () => COURSES.forEach(c => { c.units = relax.has(c.key) ? c.allUnits : inS[c.key]; });
+  set();
+  const minWas = MINCR; MINCR = 0;
+  const order = MAND.filter(c => !relax.has(c.key)).sort((a, b) => inS[a.key].length - inS[b.key].length);
+  let best = solve({}, {});
+  while (!best && order.length) { relax.add(order.shift().key); set(); best = solve({}, {}); }
+  MINCR = minWas;
+  if (best && best.credits < MINCR) { SHIFT.minFrom = MINCR; MINCR = best.credits; }
+  SHIFT.relaxed = [...relax];
+}
+const offShift = u => (PREF.shift === 'morning' || PREF.shift === 'evening') && unitShift(u) !== PREF.shift;
 
 const tagOf = u => PREF.tags[u.fkey] || 'n';
 const facOf = u => FAC_W[tagOf(u)];
@@ -783,7 +816,7 @@ function save() {
     Object.keys(st.banned).forEach(id => { const s = sigOf(id); if (s) banned.push(s); });
     const history = S.history.map(h => h.t === 'full' ? { t: 'full', sig: sigOf(h.uid) } : h);
     localStorage.setItem(LS, JSON.stringify({
-      seed: SEED_ID, tags: PREF.tags, queue: PREF.queue, course: PREF.course, limits: PREF.limits, added: PREF.added, deleted: PREF.deleted, want: PREF.want, fbCount: S.fbCount, live: S.cat.live,
+      seed: SEED_ID, tags: PREF.tags, queue: PREF.queue, course: PREF.course, limits: PREF.limits, added: PREF.added, deleted: PREF.deleted, want: PREF.want, shift: PREF.shift, fbCount: S.fbCount, live: S.cat.live,
       state: { committed, banned, dropped: st.dropped }, order: S.order, history
     }));
     if (window.acctSaved) acctSaved();
@@ -805,6 +838,7 @@ function loadPrefs() {
   PREF.tags = j.tags || {}; PREF.queue = Array.isArray(j.queue) ? j.queue : null;
   PREF.course = j.course || {}; PREF.limits = j.limits || null;
   PREF.added = Array.isArray(j.added) ? j.added : []; PREF.deleted = j.deleted || {};
+  PREF.shift = ['mix', 'morning', 'evening'].includes(j.shift) ? j.shift : 'mix';
   PREF.want = Array.isArray(j.want) ? j.want.filter(r => r && r.ck && Array.isArray(r.f) && r.f.length) : [];
   if (j.fbCount >= 1 && j.fbCount <= 4) S.fbCount = j.fbCount;
   if (typeof j.live === 'boolean') S.cat.live = j.live;
@@ -1135,6 +1169,7 @@ function nodeHTML(n) {
   if (S.selNode === n.id) cls += ' active';
   let flags = '';
   if (overrideFlag(u)) flags += '<span class="flag ov">[OVERRIDE: PRESERVES CREDITS]</span>';
+  if (offShift(u)) flags += '<span class="flag ov">OFF-SHIFT (mandatory, no fit in ' + PREF.shift + ')</span>';
   if (n.status !== 'secured' && u.course.mand === false) {
     const l = lookahead(u, { committed: Object.assign({}, n.lc ? n.lc.committed : committedUpTo(n)), banned: st.banned });
     if (l.s === 'block') flags += '<span class="flag">[BLOCKS MANDATORY COURSE]</span>';
@@ -1519,7 +1554,7 @@ function renderQueue() {
 let FACQ = '', FACC = '', FACT = '';
 function facIndex() {
   if (facIndex.c) return facIndex.c; const m = {};
-  COURSES.forEach(c => c.units.forEach(u => { (m[u.fkey] = m[u.fkey] || { name: u.faculty, courses: {} }).courses[c.key] = 1; }));
+  COURSES.forEach(c => c.allUnits.forEach(u => { (m[u.fkey] = m[u.fkey] || { name: u.faculty, courses: {} }).courses[c.key] = 1; }));
   return (facIndex.c = Object.keys(m).sort().map(k => Object.assign({ k }, m[k])));
 }
 function renderFac() {
@@ -1799,6 +1834,18 @@ function setView(v) {
 }
 document.querySelectorAll('#tabs .tab[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
 
+function shiftNote() {
+  if (PREF.shift !== 'morning' && PREF.shift !== 'evening') return '';
+  const t = [PREF.shift === 'morning' ? '☀ morning theory · evening lab' : '🌙 evening theory · morning lab'];
+  if (SHIFT.relaxed.length) t.push(SHIFT.relaxed.map(k => shortCode(CBY[k])).join(', ') + ' off-shift allowed (mandatory)');
+  if (SHIFT.minFrom != null) t.push('min credits ' + fmt(SHIFT.minFrom) + '→' + fmt(MINCR) + ' (best in this shift)');
+  return '<span class="warn" style="text-decoration:none;cursor:default" title="Shift preference — change it in the top bar">' + esc(t.join(' · ')) + '</span>';
+}
+$('#shiftSel').value = PREF.shift;
+$('#shiftSel').onchange = e => {
+  PREF.shift = e.target.value; reinit(); recalc('shift: ' + e.target.selectedOptions[0].textContent.trim());
+  toast(PREF.shift === 'mix' ? 'Any shift allowed' : (PREF.shift === 'morning' ? 'Morning theory + evening labs' : 'Evening theory + morning labs') + ' — best plan: ' + fmt(TREE_PLAN ? TREE_PLAN.credits : 0) + ' cr' + (SHIFT.relaxed.length ? ' (' + SHIFT.relaxed.map(k => shortCode(CBY[k])).join(', ') + ' kept off-shift)' : ''), 'good', 5000);
+};
 function recalc(why) {
   const t = performance.now();
   S.cat.dirty = true; S.selNode = null; REQ.stats = null;
@@ -1813,7 +1860,7 @@ function recalc(why) {
   const plan = TREE_PLAN;
   $('#status').innerHTML = '<span>' + esc(why) + '</span><span>recomputed in <b>' + S.lastMs.toFixed(1) + ' ms</b></span><span>secured <b>' + fmt(securedCredits()) + '</b> cr</span><span>best reachable <b>' + (plan ? fmt(plan.credits) : '—') + '</b> cr</span><span>seat-full marks <b>' + Object.keys(S.state.banned).length + '</b></span>' +
     ((DATA.issues || []).length ? '<span class="warn" id="issueLink">⚠ ' + DATA.issues.length + ' data issue' + (DATA.issues.length > 1 ? 's' : '') + '</span>' : '') +
-    '<span style="margin-left:auto">' + COURSES.length + ' courses · ' + Object.keys(UNITS).length + ' sections · credits ' + fmt(MINCR) + '–' + fmt(CAP) + ' · Th+Lab same faculty, opposite shift</span>';
+    shiftNote() + '<span style="margin-left:auto">' + COURSES.length + ' courses · ' + Object.keys(UNITS).length + ' sections · credits ' + fmt(MINCR) + '–' + fmt(CAP) + ' · Th+Lab same faculty, opposite shift</span>';
   const il = $('#issueLink'); if (il) il.onclick = () => { CC = 'crs'; openCC(); };
 }
 
