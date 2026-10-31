@@ -1078,7 +1078,19 @@ function drawTree(refit) {
   msg.style.display = 'none';
   const g = svg.append('g').attr('class', 'tree-group');
   const hier = d3.hierarchy(TREE_ROOT, d => d.children);
-  LAYOUT = d3.tree().nodeSize([CH + 26, CW + 70])(hier);
+  // children of different parents get extra vertical space so each family reads as a group
+  LAYOUT = d3.tree().nodeSize([CH + 26, CW + 70]).separation((a, b) => a.parent === b.parent ? 1 : 1.6)(hier);
+  /* Column gap grows with how far that level's children fan out vertically, so links
+     curve smoothly instead of squeezing into a thin column when the tree is expanded. */
+  const fan = [];
+  LAYOUT.each(d => {
+    if (!d.children) return;
+    const span = Math.max(...d.children.map(c => Math.abs(c.x - d.x)));
+    fan[d.depth] = Math.max(fan[d.depth] || 0, span);
+  });
+  const colX = [0];
+  for (let i = 1; i <= LAYOUT.height; i++) colX[i] = colX[i - 1] + CW + Math.max(160, Math.min(900, (fan[i - 1] || 0) * 0.3));
+  LAYOUT.each(d => { d.y = colX[d.depth]; });
   const hot = {}; if (S.selNode) for (let x = NODES[S.selNode]; x; x = x.parent) hot[x.id] = 1;
   const anyHot = S.selNode != null;
   const linkGen = d3.linkHorizontal().source(l => [l.source.y + CW, l.source.x]).target(l => [l.target.y, l.target.x]);
