@@ -722,7 +722,8 @@ function save() {
 function readSaved() {
   try {
     const j = JSON.parse(localStorage.getItem(LS) || 'null');
-    if (j) return j.seed === SEED_ID ? j : Object.assign(j, { tags: SEED.tags, queue: SEED.queue });
+    // only fill an empty tag set: never replace tags someone already made in this browser
+    if (j) return j.seed === SEED_ID || Object.keys(j.tags || {}).length ? j : Object.assign(j, { tags: SEED.tags, queue: j.queue || SEED.queue });
     const o = JSON.parse(localStorage.getItem(LS_OLD) || 'null');   // v2 stored index-based ids: keep only preferences
     return o ? { tags: o.tags, queue: o.queue } : SEED;
   } catch (e) { return SEED; }
