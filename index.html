@@ -55,6 +55,14 @@ button{font:inherit;color:inherit;cursor:pointer}
 .qi .mv button:disabled{opacity:.3;cursor:default}
 table.cr td input[type=number]{width:62px;background:#111a2e;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:3px 6px;font:inherit;font-size:12px}
 table.cr tr.off td{opacity:.45}
+table.cr .del{padding:1px 7px;font-size:11px}
+.addc{border:1px solid var(--border);border-radius:9px;padding:8px 11px;margin-bottom:12px;background:#0d1528}
+.addc summary{cursor:pointer;font-weight:700;font-size:13px}
+.addc .row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.addc textarea{width:100%;min-height:130px;background:#111a2e;border:1px solid var(--border);border-radius:7px;color:var(--text);padding:7px 9px;font:12px ui-monospace,Menlo,monospace;resize:vertical;box-sizing:border-box}
+.addc .pv{max-height:230px;overflow:auto;margin:8px 0;font-size:12px}
+.addc .pv table{width:100%}
+.addc .ok{color:#86efac}.addc .bad{color:#fca5a5}
 .issues{background:#2a1a0a;border:1px solid #b45309;color:#fde68a;border-radius:8px;padding:8px 10px;font-size:12px;margin-bottom:10px;line-height:1.5}
 #status .warn{color:#fde68a;cursor:pointer;text-decoration:underline dotted}
 .legend{display:flex;gap:14px;margin-left:auto;font-size:11.5px;color:var(--muted);align-items:center}
@@ -329,7 +337,8 @@ const TAB_NAME = { FC: 'Foundation Core', DC: 'Discipline Core', DE: 'Discipline
 const TAB_RANK = { FC: 0, DE: 1, DC: 2, OE: 3 };
 let COURSES = [], CBY = {}, UNITS = {}, MAND = [], ELEC = [];
 // queue: array of course keys once customised; course: {key: {credits, mand, off}}; limits: {min, max}
-const PREF = { tags: {}, queue: null, course: {}, limits: null };
+// added: courses pasted from VTOP (same shape as DATA.courses); deleted: {key: true} for removed built-in courses
+const PREF = { tags: {}, queue: null, course: {}, limits: null, added: [], deleted: {} };
 
 /* Clashes are decided on real clock time, not on timetable columns: theory and lab periods start and end at
    different minutes (TE1 11:00–11:50 overlaps L23 11:40–12:30 although they sit in different columns).
@@ -356,12 +365,84 @@ function markPeriod(mask, d, p, lab) {
 }
 function timeOf(d, p, lab) { const t = (lab ? L_MIN : T_MIN)[p], f = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); return t ? f(t[0]) + '–' + f(t[1]) : ''; }
 
+/* Built-in courses minus deleted ones, plus courses added from VTOP. */
+const allCourses = (data = DATA) => data.courses.filter(c => !PREF.deleted[c.key]).concat(PREF.added);
+
+/* ---------- VTOP paste import (mirrors build_data.py) ---------- */
+const THEORY_GRID = [
+  ['A1', 'F1', 'D1', 'TB1', 'TG1', null, null, 'A2', 'F2', 'D2', 'TB2', 'TG2'],
+  ['B1', 'G1', 'E1', 'TC1', 'TAA1', null, null, 'B2', 'G2', 'E2', 'TC2', 'TAA2'],
+  ['C1', 'A1', 'F1', 'V1', 'V2', null, null, 'C2', 'A2', 'F2', 'TD2', 'TBB2'],
+  ['D1', 'B1', 'G1', 'TE1', 'TCC1', null, null, 'D2', 'B2', 'G2', 'TE2', 'TCC2'],
+  ['E1', 'C1', 'TA1', 'TF1', 'TD1', null, null, 'E2', 'C2', 'TA2', 'TF2', 'TDD2']];
+const SLOT_CELLS = (() => {
+  const m = {};
+  THEORY_GRID.forEach((row, d) => row.forEach((s, p) => { if (s) (m[s] = m[s] || []).push([d, p]); }));
+  for (let n = 1; n <= 60; n++) m['L' + n] = [n <= 30 ? [((n - 1) / 6) | 0, (n - 1) % 6] : [((n - 31) / 6) | 0, 7 + (n - 31) % 6]];
+  return m;
+})();
+function slotCells(slot) { const out = []; for (const s of slot.split('+')) { if (!SLOT_CELLS[s]) return null; out.push(...SLOT_CELLS[s]); } return out; }
+const slotShift = cs => { const h = new Set(cs.map(([, p]) => p < 6 ? 'M' : 'E')); return h.size === 1 ? [...h][0] : null; };
+const slotTimeClash = (ct, cl) => ct.some(([d1, p1]) => cl.some(([d2, p2]) => {
+  const a = T_MIN[p1], b = L_MIN[p2]; return d1 === d2 && a && b && a[0] < b[1] && b[0] < a[1];
+}));
+const isLabRow = (slot, type) => /^(LO|ELA|LAB)$/.test(type) || (!/^(TH|ETH|SS)$/.test(type) && /^L\d/.test(slot));
+const baseCode = code => code.toUpperCase().split('/')[0].trim().replace(/[LPE]$/, '');
+
+/* Rows copied from VTOP "Course Allocation Details": Slot Detail | Venue | Faculty | Course Type (tab-separated). */
+function parseVtop(text) {
+  const rows = [], skipped = []; let code = '', name = '';
+  text.split(/\r?\n/).forEach(raw => {
+    const line = raw.trim(); if (!line || /^slot\s*detail/i.test(line)) return;
+    let cols = line.split('\t').map(x => x.trim()).filter(Boolean);
+    if (cols.length < 3) { const m = line.match(/^(\S+)\s+(\S+)\s+(.+?)\s+([A-Z]{2,4})$/); if (m) cols = m.slice(1); }
+    const slot = (cols[0] || '').toUpperCase().replace(/\s+/g, '');
+    if (cols.length >= 3 && /^[A-Z]+\d+(\+[A-Z]+\d+)*$/.test(slot)) {
+      if (!slotCells(slot)) { skipped.push(line + '   ← unknown slot'); return; }
+      const type = cols.length >= 4 ? cols[cols.length - 1].toUpperCase() : '';
+      const fac = (cols.length >= 4 ? cols.slice(2, -1) : cols.slice(2)).join(' ').replace(/\s+/g, ' ').trim().toUpperCase();
+      rows.push({ slot, venue: cols[1], fac, type, lab: isLabRow(slot, type) });
+      return;
+    }
+    const cm = line.match(/\b([A-Z]{3,4}\d{3}[A-Z]?)\s*[-–]\s*(.+)$/i);   // "BCSE305L - Embedded Systems"
+    if (cm && !code) { code = cm[1].toUpperCase(); name = cm[2].trim(); } else skipped.push(line);
+  });
+  return { rows, skipped, code, name };
+}
+/* Same-faculty theory × lab in the opposite shift with no time overlap; lab-only and theory-only courses are single-slot. */
+function buildCourse(meta, rows) {
+  const th = rows.filter(r => !r.lab), lb = rows.filter(r => r.lab), hasLab = th.length > 0 && lb.length > 0;
+  const units = [], seen = {}, stat = { orphan: 0, same: 0, overlap: 0 };
+  const add = (t, l, ct, cl) => {
+    const k = t.fac + '|' + t.slot + '|' + (l ? l.slot : '');
+    const vs = [t.venue, l && l.venue].filter(Boolean);
+    if (seen[k]) { vs.forEach(v => { if (!seen[k].v.includes(v)) seen[k].v.push(v); }); return; }
+    units.push(seen[k] = { f: t.fac, t: t.slot, l: l ? l.slot : '', v: vs, ct, cl });
+  };
+  if (!th.length) lb.forEach(l => add(l, null, [], slotCells(l.slot)));
+  else th.forEach(t => {
+    const ct = slotCells(t.slot); if (!hasLab) return add(t, null, ct, []);
+    const labs = lb.filter(l => l.fac === t.fac); if (!labs.length) { stat.orphan++; return; }
+    labs.forEach(l => {
+      const cl = slotCells(l.slot);
+      if (slotTimeClash(ct, cl)) { stat.overlap++; return; }
+      if (slotShift(ct) === slotShift(cl)) { stat.same++; return; }
+      add(t, l, ct, cl);
+    });
+  });
+  const labCr = hasLab ? 1 : 0;
+  const auto = th.length ? Math.max(0, ...units.map(u => u.t.split('+').some(x => x.startsWith('T')) ? 3 : 2)) + labCr : 1;
+  const credits = meta.credits > 0 ? meta.credits : auto;
+  return { course: { key: meta.key, code: meta.code, name: meta.name, cat: meta.cat, credits, thCr: credits - labCr, labCr, mand: meta.mand, hasLab, added: true, units },
+    th: th.length, lb: lb.length, auto, stat };
+}
+
 /* Raw DATA with the user's course overrides applied (never mutates DATA). */
 function effectiveData(data) {
   const lim = PREF.limits || {};
   CAP = lim.max > 0 ? lim.max : DEF_CAP; MINCR = lim.min >= 0 && lim.min <= CAP ? lim.min : Math.min(DEF_MIN, CAP);
   return {
-    courses: data.courses.filter(c => !(PREF.course[c.key] || {}).off).map(c => {
+    courses: allCourses(data).filter(c => !(PREF.course[c.key] || {}).off).map(c => {
       const o = PREF.course[c.key] || {};
       return Object.assign({}, c, { credits: o.credits > 0 ? o.credits : c.credits, mand: typeof o.mand === 'boolean' ? o.mand : c.mand });
     })
@@ -632,7 +713,7 @@ function save() {
     Object.keys(st.banned).forEach(id => { const s = sigOf(id); if (s) banned.push(s); });
     const history = S.history.map(h => h.t === 'full' ? { t: 'full', sig: sigOf(h.uid) } : h);
     localStorage.setItem(LS, JSON.stringify({
-      seed: SEED_ID, tags: PREF.tags, queue: PREF.queue, course: PREF.course, limits: PREF.limits, fbCount: S.fbCount, live: S.cat.live,
+      seed: SEED_ID, tags: PREF.tags, queue: PREF.queue, course: PREF.course, limits: PREF.limits, added: PREF.added, deleted: PREF.deleted, fbCount: S.fbCount, live: S.cat.live,
       state: { committed, banned, dropped: st.dropped }, order: S.order, history
     }));
   } catch (e) { }
@@ -650,6 +731,7 @@ function loadPrefs() {
   const j = SAVED; if (!j) return;
   PREF.tags = j.tags || {}; PREF.queue = Array.isArray(j.queue) ? j.queue : null;
   PREF.course = j.course || {}; PREF.limits = j.limits || null;
+  PREF.added = Array.isArray(j.added) ? j.added : []; PREF.deleted = j.deleted || {};
   if (j.fbCount >= 1 && j.fbCount <= 4) S.fbCount = j.fbCount;
   if (typeof j.live === 'boolean') S.cat.live = j.live;
 }
@@ -1294,7 +1376,7 @@ function renderQueue() {
     arr.splice(to, 0, arr.splice(from, 1)[0]); PREF.queue = arr; recalc('priority queue changed'); renderQueue();
   });
 }
-let FACQ = '', FACC = '';
+let FACQ = '', FACC = '', FACT = '';
 function facIndex() {
   if (facIndex.c) return facIndex.c; const m = {};
   COURSES.forEach(c => c.units.forEach(u => { (m[u.fkey] = m[u.fkey] || { name: u.faculty, courses: {} }).courses[c.key] = 1; }));
@@ -1304,10 +1386,11 @@ function renderFac() {
   const n = Object.keys(PREF.tags).length;
   $('#mbody').innerHTML = '<p class="note"><b>Level 2 — 4-tier faculty preference:</b> 🟢 Greenlist &gt; 🟡 Moderate &gt; ⚪ Neutral &gt; 🔴 Blacklist. Applies only among timetables with equal credits — Level 1 (credits) always wins, so a blacklisted teacher is used only as a last resort and flagged <span class="flag ov">[OVERRIDE: PRESERVES CREDITS]</span>.</p>' +
     '<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap"><input type="search" id="fq" placeholder="Search faculty…" value="' + esc(FACQ) + '" style="flex:1;min-width:180px"><select id="fc"><option value="">All courses</option>' +
-    COURSES.map(c => '<option value="' + c.key + '"' + (FACC === c.key ? ' selected' : '') + '>' + esc(shortCode(c) + ' ' + c.name) + '</option>').join('') + '</select><button class="btn" id="fclear">Clear all tags (' + n + ')</button></div><div id="fl"></div>';
+    COURSES.map(c => '<option value="' + c.key + '"' + (FACC === c.key ? ' selected' : '') + '>' + esc(shortCode(c) + ' ' + c.name) + '</option>').join('') + '</select><select id="ft">' + [['', 'All tags'], ['g', '🟢 Greenlist'], ['m', '🟡 Moderate'], ['n', '⚪ Neutral'], ['b', '🔴 Blacklist']].map(([v, l]) => '<option value="' + v + '"' + (FACT === v ? ' selected' : '') + '>' + l + '</option>').join('') +
+    '</select><button class="btn" id="fclear">Clear all tags (' + n + ')</button></div><div id="fl"></div>';
   const paint = () => {
     const q = FACQ.toLowerCase();
-    $('#fl').innerHTML = facIndex().filter(f => (!q || f.name.toLowerCase().includes(q)) && (!FACC || f.courses[FACC])).map(f => {
+    $('#fl').innerHTML = facIndex().filter(f => (!q || f.name.toLowerCase().includes(q)) && (!FACC || f.courses[FACC]) && (!FACT || (PREF.tags[f.k] || 'n') === FACT)).map(f => {
       const t = PREF.tags[f.k] || 'n';
       return '<div class="fr"><div><div class="nm">' + esc(f.name) + '</div><div class="cs">' + Object.keys(f.courses).map(k => shortCode(CBY[k])).join(' · ') + '</div></div><div class="tg" data-f="' + esc(f.k) + '">' +
         ['g', 'm', 'n', 'b'].map(x => '<button data-t="' + x + '" class="' + (t === x ? 'on' : '') + '" title="' + { g: 'Greenlist', m: 'Moderate', n: 'Neutral', b: 'Blacklist' }[x] + '">' + EMO[x] + '</button>').join('') + '</div></div>';
@@ -1316,34 +1399,70 @@ function renderFac() {
   paint();
   $('#fq').oninput = e => { FACQ = e.target.value; paint(); };
   $('#fc').onchange = e => { FACC = e.target.value; paint(); };
+  $('#ft').onchange = e => { FACT = e.target.value; paint(); };
   $('#fclear').onclick = () => { PREF.tags = {}; recalc('tags cleared'); renderFac(); };
   $('#fl').onclick = e => {
     const b = e.target.closest('button[data-t]'); if (!b) return; const f = b.parentNode.dataset.f;
     if (b.dataset.t === 'n') delete PREF.tags[f]; else PREF.tags[f] = b.dataset.t;
     b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    if (FACT && FACT !== b.dataset.t) b.closest('.fr').remove();
     $('#fclear').textContent = 'Clear all tags (' + Object.keys(PREF.tags).length + ')';
     recalc('faculty tag');
   };
 }
-/* Courses & credits: include/exclude, mandatory flag, credit override, credit window. Changes re-run everything. */
+/* Courses & credits: include/exclude, mandatory flag, credit override, credit window, delete, add from VTOP. Changes re-run everything. */
+const ADDF = { code: '', name: '', cat: 'DE', mand: false, cr: '', text: '', open: false };
+function addPreview() {
+  const P = parseVtop(ADDF.text), code = ADDF.code.trim().toUpperCase();
+  const B = buildCourse({ key: 'x', code, name: ADDF.name, cat: ADDF.cat, mand: ADDF.mand, credits: parseFloat(ADDF.cr) }, P.rows);
+  const fac = new Set(P.rows.map(r => r.fac)), err = [];
+  if (!code) err.push('Enter the course code (e.g. BCSE305L).');
+  if (!ADDF.name.trim()) err.push('Enter the course name.');
+  if (!P.rows.length) err.push('Paste the VTOP slot table (Slot Detail · Venue · Faculty · Course Type).');
+  else if (!B.course.units.length) err.push('No usable section: every theory row needs a lab of the same faculty in the opposite shift without a time overlap.');
+  const st = B.stat, notes = [];
+  if (st.orphan) notes.push(st.orphan + ' theory row(s) have no lab by the same faculty');
+  if (st.same) notes.push(st.same + ' same-shift theory+lab pair(s) dropped');
+  if (st.overlap) notes.push(st.overlap + ' time-overlapping pair(s) dropped');
+  if (P.skipped.length) notes.push(P.skipped.length + ' line(s) ignored: ' + P.skipped.slice(0, 3).map(esc).join(' · ') + (P.skipped.length > 3 ? ' …' : ''));
+  const html = !P.rows.length && !ADDF.text.trim() ? '' :
+    '<div><b>' + B.th + '</b> theory row(s), <b>' + B.lb + '</b> lab row(s), <b>' + fac.size + '</b> faculty → <b class="' + (B.course.units.length ? 'ok' : 'bad') + '">' + B.course.units.length + ' section(s)</b>' +
+    (B.lb && B.th ? ' (theory + lab of the same faculty, opposite shift)' : '') + ' · auto credits <b>' + fmt(B.auto) + '</b></div>' +
+    (notes.length ? '<div style="color:var(--muted)">' + notes.join('<br>') + '</div>' : '') +
+    (B.course.units.length ? '<table class="lk"><thead><tr><th>FACULTY</th><th>THEORY</th><th>LAB</th><th>VENUE</th></tr></thead><tbody>' +
+      B.course.units.map(u => '<tr><td>' + EMO[PREF.tags[u.f] || 'n'] + ' ' + esc(u.f) + '</td><td class="mono">' + esc(u.t) + '</td><td class="mono">' + esc(u.l || '—') + '</td><td class="mono">' + esc(u.v.join(' / ')) + '</td></tr>').join('') + '</tbody></table>' : '');
+  return { P, B, err, html };
+}
+function addFormHTML() {
+  return '<details class="addc" id="addBox"' + (ADDF.open ? ' open' : '') + '><summary>＋ Add a course from VTOP</summary>' +
+    '<p class="note" style="margin-top:8px">In VTOP → <b>Course Allocation Details</b>, select the whole table (header row is fine) and copy it into the box. If the lab is a separate course (…L and …P), paste both tables into the same box: theory (TH/ETH) and lab (LO/ELA) rows are paired by faculty, lab in the opposite shift. A line like <span class="mono">BCSE305L - Embedded Systems</span> fills the code and name.</p>' +
+    '<div class="row"><input type="text" id="addCode" placeholder="Course code" value="' + esc(ADDF.code) + '" style="width:120px"><input type="text" id="addName" placeholder="Course name" value="' + esc(ADDF.name) + '" style="flex:1;min-width:180px">' +
+    '<select id="addCat">' + Object.keys(TAB_NAME).map(k => '<option value="' + k + '"' + (ADDF.cat === k ? ' selected' : '') + '>' + k + ' — ' + TAB_NAME[k] + '</option>').join('') + '</select>' +
+    '<label class="lbl"><input type="checkbox" id="addMand"' + (ADDF.mand ? ' checked' : '') + '> Mandatory</label>' +
+    '<label class="lbl">Credits <input type="number" id="addCr" min="0.5" max="10" step="0.5" placeholder="auto" value="' + esc(ADDF.cr) + '" style="width:70px"></label></div>' +
+    '<textarea id="addPaste" placeholder="A2+TA2&#9;SJT324&#9;NARAYANAMOORTHI M&#9;TH&#10;A1+TA1&#9;SJT422&#9;YOKESH BABU S&#9;TH&#10;L31+L32&#9;SJT316&#9;YOKESH BABU S&#9;LO">' + esc(ADDF.text) + '</textarea>' +
+    '<div class="pv" id="addPrev">' + addPreview().html + '</div>' +
+    '<button class="btn pri" id="addSave">Save course &amp; recalculate</button> <button class="btn" id="addClear">Clear</button></details>';
+}
 function renderCourses() {
   const issues = (DATA.issues || []).length ? '<div class="issues"><b>⚠ Data issues found when the spreadsheet was imported</b> (fix the sheet, then run <span class="mono">python3 build_data.py</span>):<br>' + DATA.issues.map(esc).join('<br>') + '</div>' : '';
-  const rows = DATA.courses.map(c => {
+  const rows = allCourses().map(c => {
     const o = PREF.course[c.key] || {}, off = !!o.off, mand = typeof o.mand === 'boolean' ? o.mand : c.mand, cr = o.credits > 0 ? o.credits : c.credits;
     const ch = (o.credits > 0 && o.credits !== c.credits) || (typeof o.mand === 'boolean' && o.mand !== c.mand);
     return '<tr data-k="' + c.key + '" class="' + (off ? 'off' : '') + '"><td><input type="checkbox" data-f="on"' + (off ? '' : ' checked') + '></td>' +
-      '<td><b>' + esc(shortCode(c)) + '</b> ' + esc(c.name) + (ch ? ' <span class="flag ov">EDITED</span>' : '') + '</td><td><span class="chip cat">' + c.cat + '</span></td>' +
+      '<td><b>' + esc(shortCode(c)) + '</b> ' + esc(c.name) + (c.added ? ' <span class="flag good">ADDED</span>' : '') + (ch ? ' <span class="flag ov">EDITED</span>' : '') + '</td><td><span class="chip cat">' + c.cat + '</span></td>' +
       '<td><input type="checkbox" data-f="mand"' + (mand ? ' checked' : '') + '></td>' +
       '<td><input type="number" data-f="cr" min="0.5" max="10" step="0.5" value="' + cr + '"> <span style="color:var(--muted);font-size:10.5px">sheet: ' + fmt(c.credits) + '</span></td>' +
-      '<td class="mono" style="color:var(--muted)">' + c.units.length + '</td></tr>';
+      '<td class="mono" style="color:var(--muted)">' + c.units.length + '</td><td><button class="btn danger del" data-del="' + esc(c.key) + '" title="Delete this course everywhere">🗑</button></td></tr>';
   }).join('');
   const mandCr = COURSES.filter(c => c.mand).reduce((a, c) => a + c.credits, 0);
-  $('#mbody').innerHTML = issues + '<p class="note"><b>Courses &amp; credits.</b> Untick a course to leave it out of every plan, tick <i>Mandatory</i> to force it into every timetable, and correct credits if the sheet-derived value is wrong. ' +
+  $('#mbody').innerHTML = issues + addFormHTML() + '<p class="note"><b>Courses &amp; credits.</b> Untick a course to leave it out of every plan (🗑 deletes it everywhere), tick <i>Mandatory</i> to force it into every timetable, and correct credits if the sheet-derived value is wrong. ' +
     'Mandatory total: <b>' + fmt(mandCr) + '</b> cr · ' + COURSES.length + ' courses active. Data: <span class="mono">' + esc(DATA.source || 'embedded') + '</span>.</p>' +
     '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><label class="lbl">Min credits <input type="number" id="limMin" min="0" max="40" step="0.5" value="' + MINCR + '" style="width:70px"></label>' +
     '<label class="lbl">Max credits <input type="number" id="limMax" min="1" max="40" step="0.5" value="' + CAP + '" style="width:70px"></label>' +
     '<button class="btn" id="crsReset">Reset all course settings</button></div>' +
-    '<table class="lk cr"><thead><tr><th>USE</th><th>COURSE</th><th>TAB</th><th>MANDATORY</th><th>CREDITS</th><th>SECTIONS</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    '<table class="lk cr"><thead><tr><th>USE</th><th>COURSE</th><th>TAB</th><th>MANDATORY</th><th>CREDITS</th><th>SECTIONS</th><th>DELETE</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    (Object.keys(PREF.deleted).length ? '<p class="note" style="margin-top:10px">Deleted built-in courses: ' + DATA.courses.filter(c => PREF.deleted[c.key]).map(c => '<button class="btn" data-restore="' + esc(c.key) + '" title="Restore">↺ ' + esc(shortCode(c) + ' ' + c.name) + '</button>').join(' ') + '</p>' : '');
   const apply = why => { reinit(); recalc(why); renderCourses(); };
   $('#mbody').onchange = e => {
     const t = e.target;
@@ -1353,7 +1472,7 @@ function renderCourses() {
       PREF.limits = (mn === DEF_MIN && mx === DEF_CAP) ? null : { min: mn, max: mx }; apply('credit window ' + fmt(mn) + '–' + fmt(mx)); return;
     }
     const tr = t.closest('tr[data-k]'); if (!tr) return;
-    const k = tr.dataset.k, c = DATA.courses.find(x => x.key === k), o = Object.assign({}, PREF.course[k] || {});
+    const k = tr.dataset.k, c = allCourses().find(x => x.key === k), o = Object.assign({}, PREF.course[k] || {});
     if (t.dataset.f === 'on') { if (t.checked) delete o.off; else o.off = true; }
     if (t.dataset.f === 'mand') { if (t.checked === c.mand) delete o.mand; else o.mand = t.checked; }
     if (t.dataset.f === 'cr') { const v = parseFloat(t.value); if (!(v > 0)) { toast('Credits must be a positive number', 'bad'); renderCourses(); return; } if (v === c.credits) delete o.credits; else o.credits = v; }
@@ -1361,6 +1480,44 @@ function renderCourses() {
     apply('course settings: ' + shortCode(c));
   };
   $('#crsReset').onclick = () => { PREF.course = {}; PREF.limits = null; apply('course settings reset'); };
+  $('#addBox').ontoggle = e => { ADDF.open = e.target.open; };
+  $('#mbody').oninput = e => {
+    const t = e.target, f = { addCode: 'code', addName: 'name', addCr: 'cr', addPaste: 'text' }[t.id];
+    if (t.id === 'addCat') { ADDF.cat = t.value; ADDF.mand = t.value === 'DC' || t.value === 'FC'; $('#addMand').checked = ADDF.mand; }
+    else if (t.id === 'addMand') ADDF.mand = t.checked;
+    else if (f) ADDF[f] = t.value; else return;
+    if (t.id === 'addPaste') {
+      const P = parseVtop(ADDF.text);
+      if (P.code && !ADDF.code.trim()) { ADDF.code = P.code; $('#addCode').value = P.code; }
+      if (P.name && !ADDF.name.trim()) { ADDF.name = P.name; $('#addName').value = P.name; }
+    }
+    $('#addPrev').innerHTML = addPreview().html;
+  };
+  $('#mbody').onclick = e => {
+    const t = e.target.closest('button'); if (!t) return;
+    if (t.dataset.del) {
+      const k = t.dataset.del, c = allCourses().find(x => x.key === k);
+      if (!c || !confirm('Delete ' + shortCode(c) + ' ' + c.name + '?\nIt is removed from every plan, tree, the catalog and the faculty list.' + (c.added ? '' : '\n(Built-in course — you can restore it below the table.)'))) return;
+      if (c.added) PREF.added = PREF.added.filter(x => x.key !== k); else PREF.deleted[k] = true;
+      delete PREF.course[k]; apply('deleted ' + shortCode(c)); toast(shortCode(c) + ' deleted — everything recalculated', 'good');
+    } else if (t.dataset.restore) {
+      delete PREF.deleted[t.dataset.restore]; apply('restored ' + t.dataset.restore);
+    } else if (t.id === 'addClear') {
+      Object.assign(ADDF, { code: '', name: '', cr: '', text: '' }); renderCourses();
+    } else if (t.id === 'addSave') {
+      const A = addPreview(); if (A.err.length) { toast(A.err[0], 'bad', 5000); return; }
+      const code = ADDF.code.trim().toUpperCase(), base = baseCode(code);
+      const same = allCourses().filter(c => baseCode(c.code) === base);
+      if (same.length && !confirm(same.map(c => shortCode(c) + ' ' + c.name).join(', ') + ' already exists.\nReplace it with the pasted data?')) return;
+      same.forEach(c => { if (c.added) PREF.added = PREF.added.filter(x => x.key !== c.key); else PREF.deleted[c.key] = true; delete PREF.course[c.key]; });
+      let key = code.replace(/[^A-Z0-9]/g, '') || 'C'; while (allCourses().some(c => c.key === key) || DATA.courses.some(c => c.key === key)) key += '_';
+      const B = buildCourse({ key, code, name: ADDF.name.trim(), cat: ADDF.cat, mand: ADDF.mand, credits: parseFloat(ADDF.cr) }, A.P.rows).course;
+      PREF.added.push(B);
+      Object.assign(ADDF, { code: '', name: '', cr: '', text: '', open: false });
+      apply('added ' + code);
+      toast(code + ' added: ' + B.units.length + ' sections, ' + new Set(B.units.map(u => u.f)).size + ' faculty — everything recalculated', 'good', 4500);
+    }
+  };
 }
 function renderLook() {
   const rows = [];
