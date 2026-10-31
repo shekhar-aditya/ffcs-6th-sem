@@ -267,6 +267,25 @@ table.lk tr:hover td{background:#111a2e}
 .tgtl{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px;margin:8px 0 12px}
 .tgtl label{display:flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:12.5px;background:#111a2e}
 .tgtl label small{color:var(--muted);display:block;font-size:11px}
+/* ---------- View 4: requested faculty ---------- */
+#reqPanel{flex:none;border-bottom:1px solid var(--border);background:#0d1322;padding:8px 14px;max-height:46%;overflow:auto}
+#reqPanel.min #rqBody{display:none}
+.rqHead{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.rqAdd{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;margin:8px 0}
+#rqFac{display:flex;gap:5px;flex-wrap:wrap;flex:1;min-width:220px;max-height:132px;overflow:auto;align-content:flex-start}
+#rqFac label{display:flex;gap:5px;align-items:center;border:1px solid var(--border);border-radius:7px;padding:3px 8px;font-size:12px;background:#111a2e;cursor:pointer}
+#rqFac label.on{border-color:#a855f7;background:#2a1640}
+.rqi{display:flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:6px 9px;margin-bottom:5px;font-size:12.5px;background:#111a2e;flex-wrap:wrap}
+.rqi .n{font-weight:800;color:#c084fc;width:22px}
+.rqi .t{flex:1;min-width:200px}
+.rqi .st{font-size:11.5px}
+.rqi .mv button{width:24px;height:22px;border-radius:5px;border:1px solid var(--border);background:#0b1222;font-size:11px;padding:0}
+#rqStats{font-size:12.5px;margin-top:6px}
+#rqStats .big{font-size:15px;font-weight:800}
+#rqStats table{margin-top:6px}
+.chip.rq{background:#3b1a5c;color:#e9d5ff;border:1px solid #a855f7}
+.chip.rqx{background:#3a1d0a;color:#fed7aa;border:1px solid #f97316}
+#reqTreeSlot{flex:1;min-height:0;display:flex;flex-direction:column}
 </style>
 </head>
 <body>
@@ -277,6 +296,7 @@ table.lk tr:hover td{background:#111a2e}
     <button class="tab on" data-view="tree">View 1: Master Visual Flowchart</button>
     <button class="tab" data-view="cat">View 2: All Possible Trees Catalog</button>
     <button class="tab" data-view="hud">Live HUD Mode</button>
+    <button class="tab" data-view="req" title="Teachers you want — see how many schedules include them and the tree that fits most of them">View 4: Requested Faculty</button>
     <button class="tab" id="btnCC">Control Center</button>
     <button class="tab" id="btnAdd" title="Add a course from VTOP or delete courses">＋ Add / Delete Courses</button>
   </div>
@@ -329,6 +349,20 @@ table.lk tr:hover td{background:#111a2e}
     <!-- HUD -->
     <div class="view" id="view-hud"><div id="hudBox"></div></div>
 
+    <!-- VIEW 4 -->
+    <div class="view" id="view-req">
+      <div id="reqPanel">
+        <div class="rqHead"><b>Requested faculty</b><span class="note" style="margin:0">Optional — pick teachers you want for some courses. The tree below fits as many as possible, highest priority first.</span>
+          <button class="btn" id="rqToggle" style="margin-left:auto">Hide panel ▴</button></div>
+        <div id="rqBody">
+          <div class="rqAdd"><select id="rqCourse"></select><div id="rqFac"></div><button class="btn pri" id="rqAddBtn">＋ Add request</button></div>
+          <div id="rqList"></div>
+          <div id="rqStats"></div>
+        </div>
+      </div>
+      <div id="reqTreeSlot"></div>
+    </div>
+
     <div id="status"></div>
   </div>
 
@@ -373,7 +407,8 @@ const TAB_RANK = { FC: 0, DE: 1, DC: 2, OE: 3 };
 let COURSES = [], CBY = {}, UNITS = {}, MAND = [], ELEC = [];
 // queue: array of course keys once customised; course: {key: {credits, mand, off}}; limits: {min, max}
 // added: courses pasted from VTOP (same shape as DATA.courses); deleted: {key: true} for removed built-in courses
-const PREF = { tags: {}, queue: null, course: {}, limits: null, added: [], deleted: {} };
+// want: View 4 faculty requests in priority order [{ck, f: [faculty keys]}]
+const PREF = { tags: {}, queue: null, course: {}, limits: null, added: [], deleted: {}, want: [] };
 
 /* Clashes are decided on real clock time, not on timetable columns: theory and lab periods start and end at
    different minutes (TE1 11:00–11:50 overlaps L23 11:40–12:30 although they sit in different columns).
@@ -748,7 +783,7 @@ function save() {
     Object.keys(st.banned).forEach(id => { const s = sigOf(id); if (s) banned.push(s); });
     const history = S.history.map(h => h.t === 'full' ? { t: 'full', sig: sigOf(h.uid) } : h);
     localStorage.setItem(LS, JSON.stringify({
-      seed: SEED_ID, tags: PREF.tags, queue: PREF.queue, course: PREF.course, limits: PREF.limits, added: PREF.added, deleted: PREF.deleted, fbCount: S.fbCount, live: S.cat.live,
+      seed: SEED_ID, tags: PREF.tags, queue: PREF.queue, course: PREF.course, limits: PREF.limits, added: PREF.added, deleted: PREF.deleted, want: PREF.want, fbCount: S.fbCount, live: S.cat.live,
       state: { committed, banned, dropped: st.dropped }, order: S.order, history
     }));
     if (window.acctSaved) acctSaved();
@@ -770,6 +805,7 @@ function loadPrefs() {
   PREF.tags = j.tags || {}; PREF.queue = Array.isArray(j.queue) ? j.queue : null;
   PREF.course = j.course || {}; PREF.limits = j.limits || null;
   PREF.added = Array.isArray(j.added) ? j.added : []; PREF.deleted = j.deleted || {};
+  PREF.want = Array.isArray(j.want) ? j.want.filter(r => r && r.ck && Array.isArray(r.f) && r.f.length) : [];
   if (j.fbCount >= 1 && j.fbCount <= 4) S.fbCount = j.fbCount;
   if (typeof j.live === 'boolean') S.cat.live = j.live;
 }
@@ -793,6 +829,7 @@ function reinit() {
   Object.keys(st.dropped).forEach(k => { if (!CBY[k] || CBY[k].mand) delete st.dropped[k]; });
   S.order = S.order.filter(k => st.committed[k]);
   S.history = S.history.filter(h => (h.t === 'sec' && st.committed[h.ck]) || (h.t === 'full' && st.banned[h.uid]) || (h.t === 'drop' && st.dropped[h.ck]));
+  PREF.want = PREF.want.filter(r => CBY[r.ck]); if (typeof REQ !== 'undefined') REQ.dirty = true;
   if (PREF.queue) PREF.queue = PREF.queue.filter(k => CBY[k]).concat(COURSES.map(c => c.key).filter(k => !PREF.queue.includes(k)));
 }
 const mandTxt = () => 'all ' + MAND.length + ' mandatory course' + (MAND.length === 1 ? '' : 's');
@@ -807,7 +844,45 @@ function toast(msg, kind, ms) {
 
 /* ---------- derived helpers ---------- */
 const securedCredits = () => Object.keys(S.state.committed).reduce((s, k) => s + CBY[k].credits, 0);
-function planNow() { return solveState(S.state); }
+function planNow() { return reqOn() ? solveState(S.state, null, REQ.bans) : solveState(S.state); }
+
+/* ===================================================================================
+   VIEW 4 — REQUESTED FACULTY
+   Requests are taken in priority order; each one is kept if a complete timetable still exists with it and every
+   higher-priority request kept so far (greedy = optimal for strict priority). A kept request bans the course's other
+   teachers (and, for an elective, skipping the course), so the tree and timetable are built around it.
+   =================================================================================== */
+const REQ = { bans: {}, res: [], dirty: true, stats: null, statsKey: '' };
+const reqOn = () => S.view === 'req' && PREF.want.length > 0;
+function reqBansFor(r) {
+  const b = {}, c = CBY[r.ck];
+  c.units.forEach(u => { if (!r.f.includes(u.fkey)) b[u.id] = true; });
+  if (!c.mand) b[noneId(c.key)] = true;
+  return b;
+}
+function computeReq() {
+  const st = S.state; let bans = {}; REQ.res = [];
+  PREF.want.forEach(r => {
+    const c = CBY[r.ck]; let ok = false, why = '';
+    if (!c) why = 'course not active';
+    else if (!c.units.some(u => r.f.includes(u.fkey) && !st.banned[u.id])) why = 'every section of the requested teacher(s) is marked seat-full';
+    else if (st.committed[r.ck]) { ok = r.f.includes(UNITS[st.committed[r.ck]].fkey); if (!ok) why = 'you already secured another teacher for this course'; }
+    else if (st.dropped[r.ck]) why = 'you skipped this course';
+    else {
+      const tryB = Object.assign({}, bans, reqBansFor(r));
+      if (solveState(st, null, tryB)) { bans = tryB; ok = true; }
+      else why = Object.keys(bans).length && solveState(st, null, reqBansFor(r)) ? 'cannot fit together with the higher-priority requests' : 'no timetable can include this teacher (clashes with the mandatory courses or the credit limits)';
+    }
+    REQ.res.push({ r, ok, why });
+  });
+  REQ.bans = bans; REQ.dirty = false;
+}
+/* 'yes' = card is a requested teacher, 'no' = course was requested but this card is another teacher */
+function reqMatch(u) {
+  if (!reqOn() || !u) return null;
+  const r = PREF.want.find(x => x.ck === u.ckey); if (!r) return null;
+  return r.f.includes(u.fkey) ? 'yes' : 'no';
+}
 function pendingKeys(plan, st) { return orderCourseKeys(Object.keys(plan.picks).filter(k => !st.committed[k])); }
 function overrideFlag(u) { return tagOf(u) === 'b'; }
 
@@ -816,8 +891,14 @@ function pivotBranches(st, plan, unit, count) {
   const out = []; const banned = Object.assign({}, st.banned); banned[unit.id] = true;
   const fixed = stateFixed(st); const planIds = {};
   Object.values(plan.picks).forEach(u => { planIds[u.id] = 1; });
+  let relaxed = false;
   for (let i = 0; i < count; i++) {
-    const sol = solve(fixed, banned);
+    let sol = solve(fixed, banned);
+    if (!sol && reqOn() && !relaxed && REQ.bans) {   // View 4: requested teacher full -> give up that request for this course
+      const b2 = Object.assign({}, banned);
+      Object.keys(REQ.bans).forEach(id => { if ((UNITS[id] && UNITS[id].ckey === unit.ckey) || id === noneId(unit.ckey)) { if (!S.state.banned[id] && id !== unit.id) delete b2[id]; } });
+      const s2 = solve(fixed, b2); if (s2) { relaxed = true; Object.keys(banned).forEach(k => delete banned[k]); Object.assign(banned, b2); sol = s2; }
+    }
     if (!sol) {
       const others = unit.course.units.filter(x => !banned[x.id]).length;
       out.push(unit.course.mand && !others
@@ -828,7 +909,7 @@ function pivotBranches(st, plan, unit, count) {
     const diff = Object.values(sol.picks).filter(u => !planIds[u.id] && !st.committed[u.ckey]);
     if (!diff.length) { out.push({ drop: true, course: unit.course, sol }); break; }
     const ord = orderCourseKeys(diff.map(u => u.ckey)); const v = sol.picks[ord[0]];
-    out.push({ unit: v, sol });
+    out.push({ unit: v, sol, reqDrop: relaxed ? unit.course : null });
     banned[v.id] = true;
   }
   return out;
@@ -924,7 +1005,7 @@ function ttModel() {
     const e = S.cat.shown[S.cat.sel]; return { green: [], yellow: e.units, planned: [], red: [] };
   }
   let m;
-  if (S.view === 'tree' && S.selNode && NODES[S.selNode]) {
+  if ((S.view === 'tree' || S.view === 'req') && S.selNode && NODES[S.selNode]) {
     const n = NODES[S.selNode]; const path = []; for (let x = n; x; x = x.parent) if (x.unit) path.unshift(x.unit);
     const green = path.filter(u => S.state.committed[u.ckey] === u.id), yellow = path.filter(u => S.state.committed[u.ckey] !== u.id);
     const sol = n.role === 'root' ? planNow() : (n.sol || TREE_PLAN);
@@ -971,7 +1052,7 @@ function buildTree() {
   const st = S.state, plan = planNow(); TREE_PLAN = plan;
   const root = mkNode({ role: 'root', status: 'root', sec: securedCredits(), max: plan ? plan.credits : 0, infeasible: !plan });
   if (!plan) return root;
-  let cur = root, prevCat = null; const local = { committed: {}, banned: st.banned, dropped: st.dropped };
+  let cur = root, prevCat = null; const local = { committed: {}, banned: reqOn() ? Object.assign({}, st.banned, REQ.bans) : st.banned, dropped: st.dropped };
   S.order.forEach(ck => {
     if (!st.committed[ck]) return; const u = UNITS[st.committed[ck]];
     cur = mkNode({ role: 'primary', status: 'secured', unit: u, max: plan.credits, prevCat, sol: plan }, cur);
@@ -1023,7 +1104,14 @@ function chain(parent, local, plan, prevCat, topLevel) {
     pivotBranches(lc, plan, u, S.fbCount).forEach(b => {
       if (b.dead) mkNode({ role: 'fallback', status: 'dead', dead: true, label: b.label, reason: b.reason, prevCat }, cur);
       else if (b.drop) mkNode({ role: 'fallback', status: 'fb', drop: true, course: b.course, max: b.sol.credits, sol: b.sol, prevCat, lc: clone(lc) }, cur);
-      else mkNode({ role: 'fallback', status: 'fb', unit: b.unit, max: b.sol.credits, sol: b.sol, prevCat, lc: clone(lc), collapsed: true }, cur);
+      else {
+        const l2 = clone(lc);
+        if (b.reqDrop) {   // this branch gave up the request: keep the full seat banned and lift that course's request
+          const k = b.reqDrop.key; l2.banned[u.id] = true;
+          Object.keys(REQ.bans).forEach(id => { if (((UNITS[id] && UNITS[id].ckey === k) || id === noneId(k)) && !S.state.banned[id]) delete l2.banned[id]; });
+        }
+        mkNode({ role: 'fallback', status: 'fb', unit: b.unit, max: b.sol.credits, sol: b.sol, prevCat, lc: l2, collapsed: true, reqDrop: b.reqDrop }, cur);
+      }
     });
     lc.committed[ck] = u.id; cur = node; prevCat = u.cat;
   });
@@ -1058,7 +1146,8 @@ function nodeHTML(n) {
   return '<div class="' + cls + '" data-id="' + n.id + '">' +
     '<div class="nc-top"><span class="nc-code">' + esc(u.course.code) + '</span><span>' + (n.status === 'secured' ? '<span class="chip same">✓ SECURED</span> ' : n.status === 'target' ? '<span class="chip cat">NEXT</span> ' : '') + tabChip(n) + '</span></div>' +
     '<div class="nc-title">' + esc(u.course.name) + ' <span class="chip cat">' + u.cat + '</span></div>' +
-    '<div class="nc-fac">' + EMO[tagOf(u)] + ' ' + esc(u.faculty) + '</div>' +
+    '<div class="nc-fac">' + EMO[tagOf(u)] + ' ' + esc(u.faculty) + (reqMatch(u) === 'yes' ? ' <span class="chip rq">★ REQUESTED</span>' : reqMatch(u) === 'no' ? ' <span class="chip rqx">REQUEST DROPPED</span>' : '') + '</div>' +
+    (n.reqDrop && reqOn() && reqMatch(u) !== 'no' ? '<div><span class="chip rqx">REQUEST DROPPED: ' + esc(shortCode(n.reqDrop)) + ' — requested teacher full</span></div>' : '') +
     '<div class="nc-slots">' + esc(u.slots) + ' · ' + fmt(u.credits) + ' cr</div>' +
     (flags ? '<div>' + flags + '</div>' : '') +
     '<div class="nc-foot"><span class="nc-max' + (n.max < CAP ? ' low' : '') + '">Max: ' + fmt(n.max) + ' cr</span><span class="nc-btns">' + btns + '</span></div></div>';
@@ -1585,11 +1674,125 @@ $('#ttGrid').addEventListener('click', e => { const c = e.target.closest('.tc');
 /* ===================================================================================
    ROUTER / RECALC
    =================================================================================== */
+/* Possibilities: every clash-free elective combination (the View 2 catalog, same "Match my session" setting) that can
+   be completed with the mandatory courses. For each one: which requests it can include alone, and which set it can
+   include together when taken in priority order. */
+function reqStats() {
+  ensureStruct();
+  const st = S.state, live = S.cat.live, W = PREF.want, N = W.length;
+  const baseMc = MAND.map(c => ({ c, units: live ? (st.committed[c.key] ? [UNITS[st.committed[c.key]]] : sortedUnits(c, st.banned)) : c.units, maxF: 0 }));
+  const feas = (mask, rs) => {
+    const mc = baseMc.map(m => { const r = rs.find(x => x.ck === m.c.key); return r ? { c: m.c, units: m.units.filter(u => r.f.includes(u.fkey)), maxF: 0 } : m; })
+      .sort((a, b) => a.units.length - b.units.length);
+    for (const m of mc) if (!anyFits(m.units, mask)) return false;
+    return mandFeas(mask, mc);
+  };
+  const needE = live ? ELEC.filter(c => st.committed[c.key]).map(c => st.committed[c.key]) : [];
+  const res = { total: 0, all: 0, one: new Array(N).fill(0), byK: new Array(N + 1).fill(0), groups: {} };
+  for (const p of S.cat.struct.list) {
+    if (live && (needE.some(id => !p.units.some(u => u.id === id)) || p.units.some(u => st.banned[u.id] || st.dropped[u.ckey]))) continue;
+    if (!feas(p.mask, [])) continue;
+    res.total++;
+    const by = {}; p.units.forEach(u => { by[u.ckey] = u; });
+    const accM = [], acc = [];
+    W.forEach((r, i) => {
+      const c = CBY[r.ck]; let alone, ok;
+      if (!c.mand) alone = ok = !!(by[r.ck] && r.f.includes(by[r.ck].fkey));
+      else { alone = feas(p.mask, [r]); ok = alone && (!accM.length || feas(p.mask, accM.concat([r]))); if (ok) accM.push(r); }
+      if (alone) res.one[i]++;
+      if (ok) acc.push(i);
+    });
+    res.byK[acc.length]++; if (acc.length === N) res.all++;
+    const key = acc.join(','); res.groups[key] = (res.groups[key] || 0) + 1;
+  }
+  return res;
+}
+
+const RQSEL = { ck: '', f: [] };
+const facChoices = c => {
+  const m = {}; c.units.forEach(u => { (m[u.fkey] = m[u.fkey] || { k: u.fkey, name: u.faculty, slots: [] }).slots.push(u.slots); });
+  return Object.values(m).sort((a, b) => FAC_W[PREF.tags[b.k] || 'n'] - FAC_W[PREF.tags[a.k] || 'n'] || a.name.localeCompare(b.name));
+};
+function paintRqFac() {
+  const c = CBY[RQSEL.ck]; if (!c) { $('#rqFac').innerHTML = ''; return; }
+  $('#rqFac').innerHTML = facChoices(c).map(f => '<label class="' + (RQSEL.f.includes(f.k) ? 'on' : '') + '" data-f="' + esc(f.k) + '" title="' + esc(f.slots.join('\n')) + '"><input type="checkbox"' + (RQSEL.f.includes(f.k) ? ' checked' : '') + '>' +
+    EMO[PREF.tags[f.k] || 'n'] + ' ' + esc(f.name) + ' <span style="color:var(--muted)">(' + f.slots.length + ')</span></label>').join('');
+  $('#rqAddBtn').textContent = PREF.want.some(r => r.ck === RQSEL.ck) ? '✓ Update request' : '＋ Add request';
+}
+function renderReqPanel() {
+  const keys = orderCourseKeys(COURSES.map(c => c.key));
+  if (!CBY[RQSEL.ck]) { RQSEL.ck = keys[0] || ''; const r = PREF.want.find(x => x.ck === RQSEL.ck); RQSEL.f = r ? r.f.slice() : []; }
+  $('#rqCourse').innerHTML = keys.map(k => { const c = CBY[k]; return '<option value="' + esc(k) + '">' + (PREF.want.some(r => r.ck === k) ? '★ ' : '') + esc(shortCode(c) + ' ' + c.name) + (c.mand ? ' (mandatory)' : '') + '</option>'; }).join('');
+  $('#rqCourse').value = RQSEL.ck;
+  paintRqFac();
+  const W = PREF.want, st = REQ.stats;
+  $('#rqList').innerHTML = W.length ? W.map((r, i) => {
+    const c = CBY[r.ck], res = REQ.res[i] || {}, names = r.f.map(k => { const u = c.units.find(x => x.fkey === k); return EMO[PREF.tags[k] || 'n'] + ' ' + esc(u ? u.faculty : k); }).join(', ');
+    return '<div class="rqi" data-i="' + i + '"><span class="n">#' + (i + 1) + '</span><span class="t"><b>' + esc(shortCode(c)) + '</b> ' + esc(c.name) + ' — ' + names + '<br><span class="st">' +
+      (res.ok ? '<span class="flag good">IN THE TREE</span>' : '<span class="flag">NOT POSSIBLE NOW</span> ' + esc(res.why || '')) +
+      (st ? ' · possible in <b>' + st.one[i].toLocaleString() + '</b> of ' + st.total.toLocaleString() + ' schedules' : '') + '</span></span>' +
+      '<span class="mv"><button data-rq="up" title="Higher priority"' + (i ? '' : ' disabled') + '>▲</button> <button data-rq="down" title="Lower priority"' + (i < W.length - 1 ? '' : ' disabled') + '>▼</button></span>' +
+      '<button class="btn" data-rq="edit">Edit</button><button class="btn danger" data-rq="del" title="Remove request">✕</button></div>';
+  }).join('') + '<button class="btn" id="rqClear" style="margin-top:2px">Clear all requests</button>'
+    : '<p class="note" style="margin:4px 0">No requests yet — pick a course, tick the teacher(s) you want, and press <b>Add request</b>. Ticking several teachers for one course means any of them is fine. Without requests this view shows the same tree as View 1.</p>';
+  paintRqStats();
+}
+function paintRqStats() {
+  const W = PREF.want, el = $('#rqStats');
+  if (!W.length) { el.innerHTML = ''; return; }
+  if (!REQ.stats) {
+    el.innerHTML = '<span class="note">Counting possibilities…</span>';
+    clearTimeout(paintRqStats.t); paintRqStats.t = setTimeout(() => { REQ.stats = reqStats(); renderReqPanel(); }, 30); return;
+  }
+  const s = REQ.stats, N = W.length, pct = x => s.total ? ' (' + (100 * x / s.total).toFixed(1) + '%)' : '';
+  const label = key => key === '' ? '<span style="color:var(--muted)">none of them</span>' : key.split(',').map(i => '<span class="chip rq">#' + (+i + 1) + ' ' + esc(shortCode(CBY[W[+i].ck])) + '</span>').join(' ');
+  const rank = key => key === '' ? 0 : key.split(',').reduce((a, i) => a + Math.pow(2, N - +i), 0);
+  const groups = Object.keys(s.groups).sort((a, b) => rank(b) - rank(a) || s.groups[b] - s.groups[a]);
+  el.innerHTML = '<div><span class="big">' + s.all.toLocaleString() + '</span> of ' + s.total.toLocaleString() + ' schedules include <b>all ' + N + '</b> request' + (N > 1 ? 's' : '') + pct(s.all) +
+    (S.cat.live ? ' <span class="note">· matching your session (View 2 setting)</span>' : '') + '</div>' +
+    (N > 1 ? '<div style="margin-top:4px">Taking requests in priority order, schedules that fit: ' + s.byK.map((n, k) => ({ n, k })).reverse().filter(x => x.n).map(x => '<b>' + x.k + '</b> of ' + N + ': ' + x.n.toLocaleString()).join(' · ') + '</div>' : '') +
+    '<table class="lk"><thead><tr><th>REQUESTS INCLUDED TOGETHER (best by priority)</th><th>SCHEDULES</th></tr></thead><tbody>' +
+    groups.slice(0, 12).map(k => '<tr><td>' + label(k) + '</td><td class="mono">' + s.groups[k].toLocaleString() + pct(s.groups[k]) + '</td></tr>').join('') + '</tbody></table>';
+}
+$('#rqCourse').onchange = e => { RQSEL.ck = e.target.value; const r = PREF.want.find(x => x.ck === RQSEL.ck); RQSEL.f = r ? r.f.slice() : []; paintRqFac(); };
+$('#rqFac').onclick = e => {
+  const l = e.target.closest('label[data-f]'); if (!l) return; e.preventDefault();
+  const k = l.dataset.f; RQSEL.f = RQSEL.f.includes(k) ? RQSEL.f.filter(x => x !== k) : RQSEL.f.concat([k]); paintRqFac();
+};
+$('#rqAddBtn').onclick = () => {
+  if (!RQSEL.f.length) { toast('Tick at least one teacher for ' + shortCode(CBY[RQSEL.ck]), 'bad'); return; }
+  const i = PREF.want.findIndex(r => r.ck === RQSEL.ck), r = { ck: RQSEL.ck, f: RQSEL.f.slice() };
+  if (i >= 0) PREF.want[i] = r; else PREF.want.push(r);
+  recalc('request ' + (i >= 0 ? 'updated' : 'added') + ': ' + shortCode(CBY[r.ck]));
+};
+$('#rqList').onclick = e => {
+  if (e.target.id === 'rqClear') { if (confirm('Remove all faculty requests?')) { PREF.want = []; recalc('requests cleared'); } return; }
+  const b = e.target.closest('button[data-rq]'); if (!b) return;
+  const i = +b.closest('.rqi').dataset.i, W = PREF.want, a = b.dataset.rq;
+  if (a === 'edit') { RQSEL.ck = W[i].ck; RQSEL.f = W[i].f.slice(); renderReqPanel(); return; }
+  if (a === 'del') W.splice(i, 1);
+  if (a === 'up' && i > 0) W.splice(i - 1, 0, W.splice(i, 1)[0]);
+  if (a === 'down' && i < W.length - 1) W.splice(i + 1, 0, W.splice(i, 1)[0]);
+  recalc('request priority changed');
+};
+$('#rqToggle').onclick = () => { const p = $('#reqPanel'); p.classList.toggle('min'); $('#rqToggle').textContent = p.classList.contains('min') ? 'Show panel ▾' : 'Hide panel ▴'; };
+
 function setView(v) {
+  const was = S.view;
   S.view = v; S.preview = null;
+  // View 4 shows the same flowchart (toolbar + canvas) built around the requested teachers: move it over and rebuild
+  if ((v === 'req') !== (was === 'req') && (v === 'req' || was === 'req')) {
+    S.expandedBy = S.expandedBy || {}; S.expandedBy[was === 'req' ? 'req' : 'tree'] = S.expanded; S.expanded = S.expandedBy[v === 'req' ? 'req' : 'tree'] || {};
+    const tb = $('#view-tree .toolbar') || $('#reqTreeSlot .toolbar'), tw = $('#treeWrap');
+    (v === 'req' ? $('#reqTreeSlot') : $('#view-tree')).append(tb, tw);
+    tb.querySelector('h2').textContent = v === 'req' ? 'Requested-Faculty Flowchart' : 'Master Visual Flowchart';
+    if (v === 'req' && REQ.dirty) computeReq();
+    S.selNode = null; TREE_ROOT = buildTree();
+  }
   document.querySelectorAll('#tabs .tab[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === v));
   document.querySelectorAll('.view').forEach(el => el.classList.toggle('on', el.id === 'view-' + v));
-  if (v === 'tree') { drawTree(!ZOOM || ZT === d3.zoomIdentity); }
+  if (v === 'tree' || v === 'req') { drawTree(!ZOOM || ZT === d3.zoomIdentity || (v === 'req') !== (was === 'req')); }
+  if (v === 'req') renderReqPanel();
   if (v === 'cat') showCatalog();
   if (v === 'hud') renderHUD();
   refreshTT();
@@ -1598,9 +1801,11 @@ document.querySelectorAll('#tabs .tab[data-view]').forEach(b => b.onclick = () =
 
 function recalc(why) {
   const t = performance.now();
-  S.cat.dirty = true; S.selNode = null;
+  S.cat.dirty = true; S.selNode = null; REQ.stats = null;
+  if (S.view === 'req') computeReq(); else REQ.dirty = true;
   TREE_ROOT = buildTree();
-  if (S.view === 'tree') drawTree(why === 'init' || why === 'session reset');
+  if (S.view === 'tree' || S.view === 'req') drawTree(why === 'init' || why === 'session reset');
+  if (S.view === 'req') renderReqPanel();
   if (S.view === 'hud') renderHUD();
   if (S.view === 'cat') showCatalog();
   refreshTT(); save();
