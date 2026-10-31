@@ -621,6 +621,7 @@ const S = {
    data file with reordered or added rows cannot silently remap a saved choice onto another section. */
 const LS = 'ffcsstrat.v3', LS_OLD = 'ffcsstrat.v2';
 /* Built-in faculty tags and priority queue: used when this browser has nothing saved yet (e.g. first visit to the deployed site). */
+const SEED_ID = 1;   // bump when SEED changes so browsers saved before it pick up the new tags
 const SEED = {"tags":{"KANNADASAN R":"g","SELVI M":"g","ADRIJA BHATTACHARYA":"g","BHAWANA TYAGI":"g","BALAJI N":"g","BAIJU B V":"g","DILIPKUMAR S":"g","DURGESH KUMAR":"b","ISLABUDEEN M":"b","SATHYARAJ R":"m","ANAND BIHARI":"b","ARPITA GHOSH":"g","AVISHEK NANDI":"g","BANUPRIYA R":"b","BERLIN M A":"g","PRABIN S M":"m","NITHYA N S":"g","UMADEVI K S":"b","AJU D":"m","ANISHA M. LAL":"m","ANNY LEEMA A":"m","ANTO S":"m","ANURADHA G":"b","BHUVANESWARI M":"g","DEEPA D":"g","DHEEBA J":"g","JAYA SUBALAKSHMI R":"m","JAYAKUMAR S":"g","JAYASHREE J":"g","JOSHVA DEVADAS T":"b","KARTHIKA M S":"m","KRISHNAMOORTHY A":"m","MADHU VISWANATHAM V":"m","MALATHI M":"m","MANJULA R":"m","MOHAN KUMAR P":"b","MURUGAN K":"m","MYTHILI T":"b","NARAYANAMOORTHI M":"g","NARESH K":"m","NATARAJAN P":"g","NAVAMANI T M":"b","PARTHIBAN K":"m","RAJAKUMAR K":"g","RAMANATHAN L":"b","RAMANI S":"g","RAMESH BABU K":"b","RUBY D":"b","SANTHI H":"b","SARWESH P":"g","SOMASUNDARAM S K":"m","SREETHAR S":"m","SUDARSHAN NANDY":"g","USHUS ELIZEBETH ZACHARIAH":"m","YOKESH BABU S":"b"},"queue":["ACC","PHY","EDA","SLP","PA","IOT","FEC","WC","SC","PIOT","IS","DP","WAS","MAL","DF","DWM","FBT","BTC","BCA","SCT","CRY","DLT","PKI","XAI","DL","RL","MV","FDS","PC","PDS","DM","CC","PT","DIP","CV","ML","EMB","CNS","SE"],"course":{},"limits":null,"fbCount":4,"live":true,"state":{"committed":{},"banned":[],"dropped":{}},"order":[],"history":[]};
 const sigOf = id => UNITS[id] ? UNITS[id].sig : null;
 function idOfSig(sig) { for (const id in UNITS) if (UNITS[id].sig === sig) return id; return null; }
@@ -631,14 +632,15 @@ function save() {
     Object.keys(st.banned).forEach(id => { const s = sigOf(id); if (s) banned.push(s); });
     const history = S.history.map(h => h.t === 'full' ? { t: 'full', sig: sigOf(h.uid) } : h);
     localStorage.setItem(LS, JSON.stringify({
-      tags: PREF.tags, queue: PREF.queue, course: PREF.course, limits: PREF.limits, fbCount: S.fbCount, live: S.cat.live,
+      seed: SEED_ID, tags: PREF.tags, queue: PREF.queue, course: PREF.course, limits: PREF.limits, fbCount: S.fbCount, live: S.cat.live,
       state: { committed, banned, dropped: st.dropped }, order: S.order, history
     }));
   } catch (e) { }
 }
 function readSaved() {
   try {
-    const j = JSON.parse(localStorage.getItem(LS) || 'null'); if (j) return j;
+    const j = JSON.parse(localStorage.getItem(LS) || 'null');
+    if (j) return j.seed === SEED_ID ? j : Object.assign(j, { tags: SEED.tags, queue: SEED.queue });
     const o = JSON.parse(localStorage.getItem(LS_OLD) || 'null');   // v2 stored index-based ids: keep only preferences
     return o ? { tags: o.tags, queue: o.queue } : SEED;
   } catch (e) { return SEED; }
