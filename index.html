@@ -24,7 +24,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .brand b{color:var(--primary)}
 .brand span{color:var(--muted);font-weight:600}
 #tabs{display:flex;gap:4px 6px;margin-left:8px;flex-wrap:wrap;flex:0 1 auto;min-width:0}
-#shiftLbl,#gauge,#acct{flex:none}
+#shiftLbl,#crLbl,#cmpLbl,#gauge,#acct{flex:none}
 @media (max-width:1700px){#gauge .bar{width:60px}#tabs .tab{padding:6px 9px}#nav{gap:10px}}
 @media (max-width:1450px){#gauge .bar{display:none}.brand span{display:none}}
 .tab{background:transparent;border:1px solid transparent;border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600;color:var(--muted);white-space:nowrap}
@@ -176,9 +176,10 @@ kbd{background:#0b1222;border:1px solid #475569;border-bottom-width:2px;border-r
 .sq.cur{border-color:#38bdf8;background:#10233a;font-weight:700}
 
 /* ---------- timetable ---------- */
-#ttHead{display:flex;justify-content:space-between;align-items:center;padding:10px 12px 4px}
-#ttHead h3{margin:0;font-size:12px;letter-spacing:.12em;color:var(--primary)}
-#ttCr{font-weight:800}
+#ttHead{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:10px 12px 4px}
+#ttHead>span{white-space:nowrap}
+#ttHead h3{margin:0;font-size:12px;letter-spacing:.12em;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+#ttCr{font-weight:800;white-space:nowrap}#ttCr small{font-size:11px;font-weight:600;color:var(--muted)}
 #ttGrid{display:grid;grid-template-columns:46px repeat(5,1fr);gap:2px;padding:4px 10px}
 .th{font-size:10.5px;font-weight:700;color:var(--muted);text-align:center;padding:3px 0}
 .tl{font-size:9.5px;color:var(--muted);text-align:right;padding-right:3px;line-height:1.1;display:flex;align-items:center;justify-content:flex-end}
@@ -304,6 +305,8 @@ table.lk tr:hover td{background:#111a2e}
     <button class="tab" id="btnAdd" title="Add a course from VTOP or delete courses">＋ Add / Delete Courses</button>
   </div>
   <label class="lbl" id="shiftLbl" title="Applies to every view: Morning = theory before lunch with labs after; Evening = theory after lunch with labs before; Mix = any">Shift <select id="shiftSel"><option value="mix">◐ Mix</option><option value="morning">☀ Morning theory</option><option value="evening">🌙 Evening theory</option></select></label>
+  <label class="lbl" id="crLbl" title="Applies to every view: plan for exactly this many credits, or the best inside the Control Center min–max window">Credits <select id="crSel"></select></label>
+  <label class="lbl" id="cmpLbl" title="Applies to every view: among timetables with the same credits, prefer the ones with the fewest idle hours between classes (lunch is not a gap). The catalog then lists gap-free timetables first, followed by the rest."><input type="checkbox" id="cmpChk"> Compact (no gaps)</label>
   <div id="gauge" title="Credits in the timetable currently shown on the right">
     <span id="gaugeTxt">Credits: 0.0 / 27.5</span><div class="bar"><i id="gaugeBar"></i></div>
   </div>
@@ -341,7 +344,7 @@ table.lk tr:hover td{background:#111a2e}
           <select id="catTier"><option value="0">All credit tiers</option></select>
           <input type="search" id="catQ" placeholder="Filter: ML deep · exclude with -bitcoin · faculty name…" style="flex:1;min-width:200px">
           <select id="catSort">
-            <option value="rank">Sort: 3-tier rank</option><option value="cr">Sort: credits only</option><option value="fac">Sort: faculty score</option><option value="sw">Sort: fewest tab switches</option><option value="n">Sort: fewest courses</option>
+            <option value="rank">Sort: 3-tier rank</option><option value="cr">Sort: credits only</option><option value="fac">Sort: faculty score</option><option value="gap">Sort: fewest gaps</option><option value="sw">Sort: fewest tab switches</option><option value="n">Sort: fewest courses</option>
           </select>
           <label class="lbl" title="Hide schedules that conflict with what you secured, marked seat-full or skipped"><input type="checkbox" id="catLive"> Match my session</label>
           <button class="btn" id="catCopy" title="Copy the selected schedule as text">⧉ Copy selected</button>
@@ -413,7 +416,8 @@ let COURSES = [], CBY = {}, UNITS = {}, MAND = [], ELEC = [];
 // added: courses pasted from VTOP (same shape as DATA.courses); deleted: {key: true} for removed built-in courses
 // want: View 4 faculty requests in priority order [{ck, f: [faculty keys]}]
 // shift: 'mix' | 'morning' (theory before lunch, labs after) | 'evening' (theory after lunch, labs before)
-const PREF = { tags: {}, queue: null, course: {}, limits: null, added: [], deleted: {}, want: [], shift: 'mix' };
+// compact: prefer timetables with no idle hours between classes; credits: exact credit total wanted (null = best in the min–max window)
+const PREF = { tags: {}, queue: null, course: {}, limits: null, added: [], deleted: {}, want: [], shift: 'mix', compact: false, credits: null };
 
 /* Clashes are decided on real clock time, not on timetable columns: theory and lab periods start and end at
    different minutes (TE1 11:00–11:50 overlaps L23 11:40–12:30 although they sit in different columns).
@@ -516,6 +520,7 @@ function buildCourse(meta, rows) {
 function effectiveData(data) {
   const lim = PREF.limits || {};
   CAP = lim.max > 0 ? lim.max : DEF_CAP; MINCR = lim.min >= 0 && lim.min <= CAP ? lim.min : Math.min(DEF_MIN, CAP);
+  if (PREF.credits > 0) CAP = MINCR = PREF.credits;
   return {
     courses: allCourses(data).filter(c => !(PREF.course[c.key] || {}).off).map(c => {
       const o = PREF.course[c.key] || {};
@@ -541,6 +546,7 @@ function initCore(data) {
     });
     c.allUnits = c.units;
   });
+  CMP_CACHE.gen = (CMP_CACHE.gen || 0) + 1;
   applyShift();
 }
 
@@ -578,7 +584,44 @@ function prioW(ckey) {
   return r < 0 ? 0 : Math.pow(2, ELEC.length - r);
 }
 const noneId = k => k + '#none';
-function cmpT(a, b) { return (a.credits - b.credits) || (a.fac - b.fac) || (a.prio - b.prio); }
+/* Idle hours between classes on the same day. Lunch (12:50–14:00) and the short breaks between periods are not gaps. */
+const LUNCH = [770, 840];
+function gapsOf(mask) {
+  const A = ATOMS.length; let g = 0;
+  for (let d = 0; d < NDAYS; d++) {
+    let end = -1;
+    for (let i = 0; i < A; i++) {
+      const b = d * A + i; if (!((mask[(b / 30) | 0] >> (b % 30)) & 1)) continue;
+      const [s, e] = ATOMS[i];
+      if (end >= 0 && s > end) {
+        const idle = s - end - Math.max(0, Math.min(s, LUNCH[1]) - Math.max(end, LUNCH[0]));
+        if (idle >= 25) g += Math.max(1, Math.round(idle / 60));
+      }
+      end = e;
+    }
+  }
+  return g;
+}
+/* Lower bound on the final gaps of a partial timetable m when only atoms in `fill` can still be occupied:
+   a run of never-fillable idle time between two classes stays inside one gap whatever is added later.
+   It never decreases as sections are added, so it prunes soundly. */
+function gapLB(m, fill) {
+  const A = ATOMS.length, f = x => x >= 25 ? Math.max(1, Math.round(x / 60)) : 0; let g = 0;
+  for (let d = 0; d < NDAYS; d++) {
+    let seen = false, run = 0, pend = 0, longest = 0;
+    for (let i = 0; i < A; i++) {
+      const b = d * A + i, w = (b / 30) | 0, k = b % 30;
+      if ((m[w] >> k) & 1) { if (seen) longest = Math.max(longest, pend, run); seen = true; run = pend = 0; continue; }
+      if ((fill[w] >> k) & 1) { pend = Math.max(pend, run); run = 0; continue; }
+      const [s, e] = ATOMS[i]; run += (e - s) - Math.max(0, Math.min(e, LUNCH[1]) - Math.max(s, LUNCH[0]));
+    }
+    g += f(longest);
+  }
+  return g;
+}
+/* Ranking: credits, then (Compact on) fewest gaps, then faculty score, then priority. */
+const cmp3 = (a, b) => (a.credits - b.credits) || (a.fac - b.fac) || (a.prio - b.prio);
+function cmpT(a, b) { return (a.credits - b.credits) || (PREF.compact ? (b.gaps - a.gaps) : 0) || (a.fac - b.fac) || (a.prio - b.prio); }
 
 const sortedUnits = (c, banned) => c.units.filter(u => !banned[u.id]).map((u, i) => ({ u, i, f: facOf(u) }))
   .sort((a, b) => (b.f - a.f) || (a.i - b.i)).map(x => x.u);
@@ -586,12 +629,12 @@ const anyFits = (units, mask) => { for (let i = 0; i < units.length; i++) if (!c
 
 /* CSP over the mandatory courses still free: maximise faculty score, no clash. */
 function mandSolve(mask, mc) {
-  const n = mc.length; if (!n) return { fac: 0, sel: [] };
+  const n = mc.length; if (!n) return { fac: 0, sel: [], gaps: gapsOf(mask) };
   const remUB = new Array(n + 1).fill(0);
   for (let k = n - 1; k >= 0; k--) remUB[k] = remUB[k + 1] + mc[k].maxF;
-  let best = -Infinity, bestSel = null; const sel = new Array(n);
+  let best = -Infinity, bestSel = null, bestM = null; const sel = new Array(n);
   function rec(k, m, f) {
-    if (k === n) { if (f > best) { best = f; bestSel = sel.slice(); } return best >= remUB[0]; }
+    if (k === n) { if (f > best) { best = f; bestSel = sel.slice(); bestM = m; } return best >= remUB[0]; }
     for (const u of mc[k].units) {
       if (clash(u.mask, m)) continue;
       const fu = facOf(u); if (f + fu + remUB[k + 1] <= best) continue;
@@ -603,7 +646,65 @@ function mandSolve(mask, mc) {
     return false;
   }
   rec(0, mask, 0);
-  return bestSel ? { fac: best, sel: bestSel } : null;
+  return bestSel ? { fac: best, sel: bestSel, gaps: gapsOf(bestM) } : null;
+}
+/* Mandatory layout around a fixed mask; with Compact on, polished for the fewest gaps (then best faculty). */
+function mandBest(mask, mc) {
+  const r = mandSolve(mask, mc); if (!r || !PREF.compact || !r.gaps) return r;
+  const pk = {}; r.sel.forEach((u, k) => { pk[mc[k].c.key] = u; });
+  const units = {}; mc.forEach(q => { units[q.c.key] = q.units; });
+  const p = polish(mask, pk, c => units[c.key], null);
+  return { fac: p.fac, sel: mc.map(q => p.pk[q.c.key]), gaps: p.gaps };
+}
+
+/* Compact: local search from a finished timetable. pk = the sections that may change, on top of the fixed mask `base`.
+   Each round tries every other section of each course — moving one clashing course along with it when needed — and,
+   if allowed, swapping an elective for another of the same credits; it keeps the move that leaves the fewest gap hours
+   (ties: better faculty, then priority). Credits never change, so the credit tier is untouched. */
+function polish(base, pk, opts, canSwap, deep) {
+  const better = (a, b) => (a.gaps - b.gaps) || (b.fac - a.fac) || (b.prio - a.prio);
+  const score = p => { let m = base, fac = 0, prio = 0; for (const k in p) { m = orMask(m, p[k].mask); fac += facOf(p[k]); prio += prioW(k); } return { gaps: gapsOf(m), fac, prio }; };
+  let cur = score(pk);
+  for (let round = 0; round < 40 && cur.gaps; round++) {
+    const keys = Object.keys(pk); let bestP = null, bestS = cur;
+    const consider = (p, m, df, dp) => {
+      const s = { gaps: gapsOf(m), fac: cur.fac + df, prio: cur.prio + dp };
+      if (better(s, bestS) < 0) { bestS = s; bestP = p; }
+    };
+    for (const k of keys) {
+      const old = pk[k]; let rest = base; keys.forEach(j => { if (j !== k) rest = orMask(rest, pk[j].mask); });
+      const courses = [CBY[k]];
+      if (canSwap && !CBY[k].mand) ELEC.forEach(c => { if (!pk[c.key] && c.credits === CBY[k].credits && canSwap(c)) courses.push(c); });
+      for (const c of courses) for (const u of opts(c)) {
+        if (u === old) continue;
+        const df = facOf(u) - facOf(old), dp = prioW(c.key) - prioW(k);
+        if (!clash(u.mask, rest)) { const p = Object.assign({}, pk); delete p[k]; p[c.key] = u; consider(p, orMask(rest, u.mask), df, dp); continue; }
+        if (clash(u.mask, base)) continue;
+        const hit = keys.filter(j => j !== k && clash(u.mask, pk[j].mask)); if (hit.length !== 1) continue;
+        const j = hit[0]; let rest2 = orMask(base, u.mask); keys.forEach(x => { if (x !== k && x !== j) rest2 = orMask(rest2, pk[x].mask); });
+        for (const v of opts(CBY[j])) {
+          if (v === pk[j]) continue;
+          const dv = df + facOf(v) - facOf(pk[j]);
+          if (!clash(v.mask, rest2)) {
+            const p = Object.assign({}, pk); delete p[k]; p[c.key] = u; p[j] = v;
+            consider(p, orMask(rest2, v.mask), dv, dp); continue;
+          }
+          // ejection chain: v pushes out exactly one more course x, which moves to any free section
+          if (!deep || clash(v.mask, base)) continue;
+          const hit2 = keys.filter(x => x !== k && x !== j && clash(v.mask, pk[x].mask)); if (hit2.length !== 1) continue;
+          const x = hit2[0]; let rest3 = orMask(orMask(base, u.mask), v.mask); keys.forEach(y => { if (y !== k && y !== j && y !== x) rest3 = orMask(rest3, pk[y].mask); });
+          if (clash(u.mask, v.mask)) continue;
+          for (const w of opts(CBY[x])) {
+            if (clash(w.mask, rest3)) continue;
+            const p = Object.assign({}, pk); delete p[k]; p[c.key] = u; p[j] = v; p[x] = w;
+            consider(p, orMask(rest3, w.mask), dv + facOf(w) - facOf(pk[x]), dp);
+          }
+        }
+      }
+    }
+    if (!bestP) break; pk = bestP; cur = bestS;
+  }
+  return Object.assign({ pk }, cur);
 }
 
 /* Feasibility-only CSP (no scoring): can every course in mc be given a mutually conflict-free section? */
@@ -623,8 +724,79 @@ function mandFeas(mask, mc) {
 }
 
 /* The 3-tier solver. fixed: {ckey: unitId|ckey#none}; banned: {unitId|ckey#none: true}.
-   Returns best complete timetable by (credits, faculty score, priority) or null. */
+   Returns best complete timetable by (credits, faculty score, priority) or null.
+   Compact on: the answer is then polished for the fewest gaps at the same credits (see polish). */
+const GAP_STEPS = 5000;
+/* Compact answers are cached: the tree asks the same questions again after every click. The cache is dropped whenever
+   anything that changes the answer does (course data, shift, credits, tags, queue). */
+const CMP_CACHE = { sig: '', map: new Map() };
 function solve(fixed, banned, budget) {
+  if (!PREF.compact) return solveCore(fixed, banned, budget);
+  const sig = CMP_CACHE.gen + '|' + MINCR + '|' + CAP + '|' + JSON.stringify(PREF.tags) + JSON.stringify(PREF.queue);
+  if (sig !== CMP_CACHE.sig) { CMP_CACHE.sig = sig; CMP_CACHE.map.clear(); }
+  const key = JSON.stringify([fixed || {}, banned || {}, budget || 0]);
+  if (CMP_CACHE.map.has(key)) return CMP_CACHE.map.get(key);
+  const r = solveCompact(fixed, banned, budget);
+  if (CMP_CACHE.map.size > 3000) CMP_CACHE.map.clear();
+  CMP_CACHE.map.set(key, r); return r;
+}
+function solveCompact(fixed, banned, budget) {
+  const r = solveCore(fixed, banned, budget);
+  if (!r || !r.gaps) return r;
+  fixed = fixed || {}; banned = banned || {};
+  let base = zeroMask(); const fx = Object.keys(r.picks).filter(k => fixed[k]);
+  fx.forEach(k => { base = orMask(base, r.picks[k].mask); });
+  const opts = c => sortedUnits(c, banned), swap = c => !fixed[c.key];
+  const free = picks => { const pk = {}; Object.keys(picks).forEach(k => { if (!fixed[k]) pk[k] = picks[k]; }); return pk; };
+  let p = polish(base, free(r.picks), opts, swap, true);
+  while (p.gaps) {   // ask for anything better than the best so far, then tighten; stops at the first miss
+    const q = gapSearch(base, fixed, banned, r.credits, p.gaps - 1, GAP_STEPS); if (!q) break;
+    const q2 = polish(base, q, opts, swap, true); if (q2.gaps >= p.gaps) break; p = q2;
+  }
+  const picks = {}; fx.forEach(k => { picks[k] = r.picks[k]; }); Object.assign(picks, p.pk);
+  return { credits: r.credits, gaps: p.gaps, fac: p.fac + fx.reduce((a, k) => a + facOf(r.picks[k]), 0), prio: p.prio + fx.reduce((a, k) => a + prioW(k), 0), picks, approx: r.approx };
+}
+/* Compact: depth-first search for a timetable of exactly `credits` with at most `g` gap hours, within `limit` steps.
+   Electives are chosen first (most have one section, so this picks the set of courses), then the mandatory courses
+   (gap-friendliest section first); gapLB prunes every branch that can no longer stay within g. Returns the changeable
+   picks or null. */
+function gapSearch(base, fixed, banned, credits, g, limit) {
+  let cr = 0; Object.keys(fixed).forEach(k => { if (fixed[k] !== noneId(k)) cr += CBY[k].credits; });
+  const mf = MAND.filter(c => !fixed[c.key]).map(c => ({ c, units: sortedUnits(c, banned), mand: true }))
+    .sort((a, b) => a.units.length - b.units.length);
+  mf.forEach(q => { cr += q.c.credits; });
+  const el = ELEC.filter(c => !fixed[c.key]).map(c => ({ c, units: sortedUnits(c, banned), canNone: !banned[noneId(c.key)] }))
+    .filter(q => q.units.length || !q.canNone).sort((a, b) => b.c.credits - a.c.credits);
+  const L = el.concat(mf), n = L.length, ne = el.length, fill = new Array(n + 1), sufCr = new Array(n + 1).fill(0);
+  fill[n] = zeroMask();
+  for (let i = n - 1; i >= 0; i--) {
+    fill[i] = fill[i + 1]; L[i].units.forEach(u => { fill[i] = orMask(fill[i], u.mask); });
+    sufCr[i] = sufCr[i + 1] + (i < ne ? L[i].c.credits : 0);
+  }
+  let found = null, steps = 0; const sel = new Array(n).fill(null);
+  function rec(i, m, cr) {
+    if (found || ++steps > limit) return;
+    if (cr > credits + 1e-9 || cr + sufCr[i] < credits - 1e-9 || gapLB(m, fill[i]) > g) return;
+    if (i === n) {
+      if (gapsOf(m) <= g) { found = {}; sel.forEach((u, k) => { if (u) found[L[k].c.key] = u; }); }
+      return;
+    }
+    const q = L[i], add = i < ne ? q.c.credits : 0;
+    if (cr + add <= credits + 1e-9) for (const u of i < ne ? q.units : byGaps(q.units, m)) {
+      if (clash(u.mask, m)) continue;
+      const nx = orMask(m, u.mask); let ok = true;
+      for (let j = Math.max(i + 1, ne); j < n; j++) if (!anyFits(L[j].units, nx)) { ok = false; break; }
+      if (!ok) continue;
+      sel[i] = u; rec(i + 1, nx, cr + add); sel[i] = null; if (found) return;
+    }
+    if (i < ne && q.canNone) rec(i + 1, m, cr);
+  }
+  rec(0, base, cr);
+  return found;
+}
+/* Sections in order of the gap hours they leave on top of m (faculty order breaks ties: the sort is stable). */
+const byGaps = (units, m) => units.map(u => ({ u, g: gapsOf(orMask(m, u.mask)) })).sort((a, b) => a.g - b.g).map(x => x.u);
+function solveCore(fixed, banned, budget) {
   fixed = fixed || {}; banned = banned || {}; budget = budget || 400000;
   const picks = {}; let mask = zeroMask(), credits = 0, fac = 0, prio = 0;
   for (const c of COURSES) {
@@ -665,8 +837,8 @@ function solve(fixed, banned, budget) {
     if (i === n) {
       if (cr < MINCR) return;
       const r = mandSolve(m, mc); if (!r) return;
-      const cand2 = { credits: cr, fac: f + r.fac, prio: p };
-      if (!best || cmpT(cand2, best) > 0) {
+      const cand2 = { credits: cr, gaps: r.gaps, fac: f + r.fac, prio: p };
+      if (!best || cmp3(cand2, best) > 0) {
         const pk = Object.assign({}, picks);
         chosen.forEach((u, k) => { if (u) pk[cand[k].c.key] = u; });
         r.sel.forEach((u, k) => { pk[mc[k].c.key] = u; });
@@ -816,7 +988,7 @@ function save() {
     Object.keys(st.banned).forEach(id => { const s = sigOf(id); if (s) banned.push(s); });
     const history = S.history.map(h => h.t === 'full' ? { t: 'full', sig: sigOf(h.uid) } : h);
     localStorage.setItem(LS, JSON.stringify({
-      seed: SEED_ID, tags: PREF.tags, queue: PREF.queue, course: PREF.course, limits: PREF.limits, added: PREF.added, deleted: PREF.deleted, want: PREF.want, shift: PREF.shift, fbCount: S.fbCount, live: S.cat.live,
+      seed: SEED_ID, tags: PREF.tags, queue: PREF.queue, course: PREF.course, limits: PREF.limits, added: PREF.added, deleted: PREF.deleted, want: PREF.want, shift: PREF.shift, compact: PREF.compact, credits: PREF.credits, fbCount: S.fbCount, live: S.cat.live,
       state: { committed, banned, dropped: st.dropped }, order: S.order, history
     }));
     if (window.acctSaved) acctSaved();
@@ -839,6 +1011,7 @@ function loadPrefs() {
   PREF.course = j.course || {}; PREF.limits = j.limits || null;
   PREF.added = Array.isArray(j.added) ? j.added : []; PREF.deleted = j.deleted || {};
   PREF.shift = ['mix', 'morning', 'evening'].includes(j.shift) ? j.shift : 'mix';
+  PREF.compact = j.compact === true; PREF.credits = j.credits > 0 ? j.credits : null;
   PREF.want = Array.isArray(j.want) ? j.want.filter(r => r && r.ck && Array.isArray(r.f) && r.f.length) : [];
   if (j.fbCount >= 1 && j.fbCount <= 4) S.fbCount = j.fbCount;
   if (typeof j.live === 'boolean') S.cat.live = j.live;
@@ -865,6 +1038,7 @@ function reinit() {
   S.history = S.history.filter(h => (h.t === 'sec' && st.committed[h.ck]) || (h.t === 'full' && st.banned[h.uid]) || (h.t === 'drop' && st.dropped[h.ck]));
   PREF.want = PREF.want.filter(r => CBY[r.ck]); if (typeof REQ !== 'undefined') REQ.dirty = true;
   if (PREF.queue) PREF.queue = PREF.queue.filter(k => CBY[k]).concat(COURSES.map(c => c.key).filter(k => !PREF.queue.includes(k)));
+  paintCrSel();
 }
 const mandTxt = () => 'all ' + MAND.length + ' mandatory course' + (MAND.length === 1 ? '' : 's');
 
@@ -1008,7 +1182,10 @@ function renderTT(model) {
   });
   const used = (model.green || []).concat(model.yellow || []);
   const seen = {}; let cr = 0; used.forEach(u => { if (!seen[u.id]) { seen[u.id] = 1; cr += u.credits; } });
-  $('#ttCr').textContent = fmt(cr) + ' cr';
+  // gap hours of everything on the grid (secured, targeted and planned) — what the week will actually look like
+  let gm = zeroMask(), any = false; used.concat(model.planned || []).forEach(u => { gm = orMask(gm, u.mask); any = true; });
+  const gp = gapsOf(gm);
+  $('#ttCr').innerHTML = fmt(cr) + ' cr' + (any ? ' <small title="Idle hours between classes in the week shown (lunch not counted)">· ' + (gp ? gp + 'h gap' : 'no gap') + '</small>' : '');
   $('#gaugeTxt').textContent = 'Credits: ' + fmt(cr) + ' / ' + fmt(CAP);
   $('#gaugeBar').style.width = Math.min(100, cr / CAP * 100) + '%';
   const row = (u, cls) => '<div class="tli ' + cls + '"><b>' + esc(u.course.code) + '</b> ' + esc(u.course.name) + ' <span class="chip cat">' + u.cat + '</span><br>' +
@@ -1440,14 +1617,14 @@ function scoreCatalog() {
       const ids = {}; p.units.forEach(u => { ids[u.id] = 1; });
       if (needE.some(id => !ids[id]) || p.units.some(u => st.banned[u.id] || st.dropped[u.ckey])) { hidden++; return; }
     }
-    const r = mandSolve(p.mask, mc); if (!r) { hidden++; return; }
+    const r = mandBest(p.mask, mc); if (!r) { hidden++; return; }
     const units = p.units.slice(); r.sel.forEach(u => units.push(u));
     let fac = r.fac, prio = 0; p.units.forEach(u => { fac += facOf(u); prio += prioW(u.ckey); });
     const keys = orderCourseKeys(units.map(u => u.ckey)), dist = { g: 0, m: 0, n: 0, b: 0 };
     units.forEach(u => { dist[tagOf(u)]++; });
-    out.push({ units, credits: p.credits, fac, prio, sw: switchCount(keys), dist, text: units.map(u => (u.ckey + ' ' + shortCode(u.course) + ' ' + u.course.code + ' ' + u.course.name + ' ' + u.faculty + ' ' + u.slots).toLowerCase()).join('|') });
+    out.push({ units, credits: p.credits, gaps: r.gaps, fac, prio, sw: switchCount(keys), dist, text: units.map(u => (u.ckey + ' ' + shortCode(u.course) + ' ' + u.course.code + ' ' + u.course.name + ' ' + u.faculty + ' ' + u.slots).toLowerCase()).join('|') });
   });
-  out.sort((a, b) => cmpT(b, a) || (a.sw - b.sw));
+  out.sort((a, b) => (PREF.compact ? a.gaps - b.gaps : 0) || cmpT(b, a) || (a.sw - b.sw));
   out.forEach((e, i) => { e.rank = i + 1; });
   S.cat.list = out; S.cat.hidden = hidden; S.cat.dirty = false; S.cat.ms = performance.now() - t0;
 }
@@ -1459,6 +1636,7 @@ function filterCatalog() {
   if (sort === 'cr') l = l.slice().sort((a, b) => b.credits - a.credits || a.rank - b.rank);
   else if (sort === 'fac') l = l.slice().sort((a, b) => b.fac - a.fac || a.rank - b.rank);
   else if (sort === 'sw') l = l.slice().sort((a, b) => a.sw - b.sw || a.rank - b.rank);
+  else if (sort === 'gap') l = l.slice().sort((a, b) => a.gaps - b.gaps || a.rank - b.rank);
   else if (sort === 'n') l = l.slice().sort((a, b) => a.units.length - b.units.length || a.rank - b.rank);
   S.cat.shown = l; S.cat.sel = -1;
   $('#catSpacer').style.height = (l.length * ROW + 12) + 'px';
@@ -1480,7 +1658,7 @@ function paintCatalog() {
       '<span class="cc ' + (u.course.mand ? 'mand' : 'de') + ' ' + tagOf(u) + '" title="' + esc(u.course.name + ' — ' + u.faculty + ' — ' + u.slots) + '">' + EMO[tagOf(u)] + ' ' + esc(shortCode(u.course)) + (u.course.mand ? '' : ' ' + esc(u.course.name.length > 26 ? u.course.name.slice(0, 24).trim() + '…' : u.course.name)) + ' · ' + esc(u.faculty.split(' ')[0]) + '</span>').join('');
     html += '<div class="sch' + (i === S.cat.sel ? ' sel' : '') + '" data-i="' + i + '" style="top:' + (6 + i * ROW) + 'px"><div class="rk"><span class="n">#' + e.rank + '</span><span class="cr' + (e.credits < CAP ? ' low' : '') + '">' + fmt(e.credits) + '</span><span class="n">credits</span></div>' +
       '<div class="chips">' + chips + '</div>' +
-      '<div class="meta"><div>Faculty: <b>' + e.dist.g + '</b>🟢 <b>' + e.dist.m + '</b>🟡 <b>' + e.dist.n + '</b>⚪ <b>' + e.dist.b + '</b>🔴</div><div>VTOP tab switches: <b>' + e.sw + '</b></div>' +
+      '<div class="meta"><div>Faculty: <b>' + e.dist.g + '</b>🟢 <b>' + e.dist.m + '</b>🟡 <b>' + e.dist.n + '</b>⚪ <b>' + e.dist.b + '</b>🔴</div><div>VTOP tab switches: <b>' + e.sw + '</b> · ' + (e.gaps ? 'gaps: <b>' + e.gaps + ' h</b>' : '<b class="ok">no gaps</b>') + '</div>' +
       (e.dist.b ? '<div><span class="flag ov">[OVERRIDE: PRESERVES CREDITS]</span></div>' : '') + '<div>' + e.units.length + ' courses · Th+Lab same faculty, opposite shift ✔</div></div></div>';
   }
   sp.innerHTML = html;
@@ -1633,8 +1811,8 @@ function renderCourses() {
   const mandCr = COURSES.filter(c => c.mand).reduce((a, c) => a + c.credits, 0);
   $('#mbody').innerHTML = issues + addFormHTML() + '<p class="note"><b>Courses &amp; credits.</b> Untick a course to leave it out of every plan (🗑 deletes it everywhere), tick <i>Mandatory</i> to force it into every timetable, and correct credits if the sheet-derived value is wrong. ' +
     'Mandatory total: <b>' + fmt(mandCr) + '</b> cr · ' + COURSES.length + ' courses active. Data: <span class="mono">' + esc(DATA.source || 'embedded') + '</span>.</p>' +
-    '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><label class="lbl">Min credits <input type="number" id="limMin" min="0" max="40" step="0.5" value="' + MINCR + '" style="width:70px"></label>' +
-    '<label class="lbl">Max credits <input type="number" id="limMax" min="1" max="40" step="0.5" value="' + CAP + '" style="width:70px"></label>' +
+    '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><label class="lbl">Min credits <input type="number" id="limMin" min="0" max="40" step="0.5" value="' + crWindow()[0] + '" style="width:70px"></label>' +
+    '<label class="lbl">Max credits <input type="number" id="limMax" min="1" max="40" step="0.5" value="' + crWindow()[1] + '" style="width:70px"></label>' +
     '<button class="btn" id="crsReset">Reset all course settings</button></div>' +
     '<table class="lk cr"><thead><tr><th>USE</th><th>COURSE</th><th>TAB</th><th>MANDATORY</th><th>CREDITS</th><th>SECTIONS</th><th>DELETE</th></tr></thead><tbody>' + rows + '</tbody></table>' +
     (Object.keys(PREF.deleted).length ? '<p class="note" style="margin-top:10px">Deleted built-in courses: ' + DATA.courses.filter(c => PREF.deleted[c.key]).map(c => '<button class="btn" data-restore="' + esc(c.key) + '" title="Restore">↺ ' + esc(shortCode(c) + ' ' + c.name) + '</button>').join(' ') + '</p>' : '');
@@ -1846,6 +2024,31 @@ $('#shiftSel').onchange = e => {
   PREF.shift = e.target.value; reinit(); recalc('shift: ' + e.target.selectedOptions[0].textContent.trim());
   toast(PREF.shift === 'mix' ? 'Any shift allowed' : (PREF.shift === 'morning' ? 'Morning theory + evening labs' : 'Evening theory + morning labs') + ' — best plan: ' + fmt(TREE_PLAN ? TREE_PLAN.credits : 0) + ' cr' + (SHIFT.relaxed.length ? ' (' + SHIFT.relaxed.map(k => shortCode(CBY[k])).join(', ') + ' kept off-shift)' : ''), 'good', 5000);
 };
+/* Credit window from the Control Center (the top-bar Credits picker narrows it to one exact value). */
+const crWindow = () => { const l = PREF.limits || {}, hi = l.max > 0 ? l.max : DEF_CAP; return [l.min >= 0 && l.min <= hi ? l.min : Math.min(DEF_MIN, hi), hi]; };
+/* Exact totals reachable from the mandatory credits plus any set of electives, each checked against the solver
+   (current shift and course settings) so the picker only offers totals a clash-free timetable can reach. */
+function paintCrSel() {
+  const [lo, hi] = crWindow(), base = MAND.reduce((a, c) => a + c.credits, 0);
+  let sums = new Set([base]);
+  ELEC.filter(c => c.units.length).forEach(c => { [...sums].forEach(v => { if (v + c.credits <= hi + 1e-9) sums.add(Math.round((v + c.credits) * 10) / 10); }); });
+  const keep = [MINCR, CAP], ok = [];
+  [...sums].sort((a, b) => b - a).forEach(v => { MINCR = CAP = v; if (solve({}, {}, 30000)) ok.push(v); });
+  [MINCR, CAP] = keep;
+  if (PREF.credits > 0 && !ok.includes(PREF.credits)) ok.push(PREF.credits), ok.sort((a, b) => b - a);
+  $('#crSel').innerHTML = '<option value="">Best (' + fmt(lo) + '–' + fmt(hi) + ')</option>' + ok.map(v => '<option value="' + v + '">' + fmt(v) + ' cr</option>').join('');
+  $('#crSel').value = PREF.credits > 0 ? String(PREF.credits) : '';
+}
+$('#crSel').onchange = e => {
+  PREF.credits = e.target.value ? +e.target.value : null; reinit();
+  recalc(PREF.credits ? 'credits: exactly ' + fmt(PREF.credits) : 'credits: best in window');
+  if (!TREE_PLAN) toast('No clash-free timetable has exactly ' + fmt(PREF.credits) + ' credits with the current settings', 'bad', 5000);
+};
+$('#cmpChk').checked = PREF.compact;
+$('#cmpChk').onchange = e => {
+  PREF.compact = e.target.checked; recalc(PREF.compact ? 'compact: fewest gaps first' : 'compact off');
+  toast(PREF.compact ? 'Compact on — best plan has ' + (TREE_PLAN ? (TREE_PLAN.gaps ? TREE_PLAN.gaps + ' h of gaps' : 'no gaps') : '—') + '; catalog lists gap-free timetables first' : 'Compact off — gaps no longer considered', 'good', 5000);
+};
 function recalc(why) {
   const t = performance.now();
   S.cat.dirty = true; S.selNode = null; REQ.stats = null;
@@ -1866,6 +2069,7 @@ function recalc(why) {
 
 buildTTSkeleton();
 loadState();
+paintCrSel();
 recalc('init');
 window.addEventListener('resize', () => { if (S.view === 'cat') paintCatalog(); });
 </script>
