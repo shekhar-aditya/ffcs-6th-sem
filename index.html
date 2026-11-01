@@ -417,7 +417,7 @@ let COURSES = [], CBY = {}, UNITS = {}, MAND = [], ELEC = [];
 // want: View 4 faculty requests in priority order [{ck, f: [faculty keys]}]
 // shift: 'mix' | 'morning' (theory before lunch, labs after) | 'evening' (theory after lunch, labs before)
 // compact: prefer timetables with no idle hours between classes; credits: exact credit total wanted (null = best in the min–max window)
-const PREF = { tags: {}, queue: null, course: {}, limits: null, added: [], deleted: {}, want: [], shift: 'mix', compact: false, credits: null };
+const PREF = { tags: {}, queue: null, course: {}, limits: null, added: [], deleted: {}, want: [], shift: 'mix', compact: false, credits: null, noRed: false };
 
 /* Clashes are decided on real clock time, not on timetable columns: theory and lab periods start and end at
    different minutes (TE1 11:00–11:50 overlaps L23 11:40–12:30 although they sit in different columns).
@@ -988,7 +988,7 @@ function save() {
     Object.keys(st.banned).forEach(id => { const s = sigOf(id); if (s) banned.push(s); });
     const history = S.history.map(h => h.t === 'full' ? { t: 'full', sig: sigOf(h.uid) } : h);
     localStorage.setItem(LS, JSON.stringify({
-      seed: SEED_ID, tags: PREF.tags, queue: PREF.queue, course: PREF.course, limits: PREF.limits, added: PREF.added, deleted: PREF.deleted, want: PREF.want, shift: PREF.shift, compact: PREF.compact, credits: PREF.credits, fbCount: S.fbCount, live: S.cat.live,
+      seed: SEED_ID, tags: PREF.tags, queue: PREF.queue, course: PREF.course, limits: PREF.limits, added: PREF.added, deleted: PREF.deleted, want: PREF.want, shift: PREF.shift, compact: PREF.compact, noRed: PREF.noRed, credits: PREF.credits, fbCount: S.fbCount, live: S.cat.live,
       state: { committed, banned, dropped: st.dropped }, order: S.order, history
     }));
     if (window.acctSaved) acctSaved();
@@ -1011,7 +1011,7 @@ function loadPrefs() {
   PREF.course = j.course || {}; PREF.limits = j.limits || null;
   PREF.added = Array.isArray(j.added) ? j.added : []; PREF.deleted = j.deleted || {};
   PREF.shift = ['mix', 'morning', 'evening'].includes(j.shift) ? j.shift : 'mix';
-  PREF.compact = j.compact === true; PREF.credits = j.credits > 0 ? j.credits : null;
+  PREF.compact = j.compact === true; PREF.noRed = j.noRed === true; PREF.credits = j.credits > 0 ? j.credits : null;
   PREF.want = Array.isArray(j.want) ? j.want.filter(r => r && r.ck && Array.isArray(r.f) && r.f.length) : [];
   if (j.fbCount >= 1 && j.fbCount <= 4) S.fbCount = j.fbCount;
   if (typeof j.live === 'boolean') S.cat.live = j.live;
@@ -1498,16 +1498,26 @@ function resetSession() { S.state = newState(); S.order = []; S.history = []; S.
 /* ===================================================================================
    HUD
    =================================================================================== */
+/* Bans for every 🔴 blacklisted section not already secured (HUD "Avoid 🔴" switch). */
+function redBans() {
+  const b = {}, sec = {}; Object.values(S.state.committed).forEach(id => { sec[id] = 1; });
+  Object.values(UNITS).forEach(u => { if (tagOf(u) === 'b' && !sec[u.id]) b[u.id] = true; });
+  return b;
+}
 function hudModel() {
-  const st = S.state, plan = planNow();
+  let st = S.state, plan = planNow();
   if (!plan) return { infeasible: true };
+  // best plan with no 🔴 faculty at all (null when a mandatory course only has 🔴 sections left)
+  const rb = redBans(), noRed = Object.keys(rb).length ? solveState(st, null, rb) : plan;
+  const avoid = PREF.noRed && noRed && noRed !== plan;
+  if (avoid) { st = { committed: st.committed, banned: Object.assign({}, st.banned, rb), dropped: st.dropped }; plan = noRed; }
   const pend = pendingKeys(plan, st);
   const prevCat = S.order.length ? CBY[S.order[S.order.length - 1]].cat : null;
-  if (!pend.length) return { done: true, plan, pend };
+  if (!pend.length) return { done: true, plan, pend, noRed, rb, avoid };
   const u0 = plan.picks[pend[0]];
   const branches = [{ unit: u0, sol: plan, primary: true }].concat(pivotBranches(st, plan, u0, 2));
   const sel = Math.min(S.hudSel, branches.length - 1);
-  return { plan, pend, branches, sel, cur: branches[sel], prevCat, stepNo: Object.keys(st.committed).length + 1, total: Object.keys(plan.picks).length };
+  return { plan, pend, branches, sel, cur: branches[sel], prevCat, stepNo: Object.keys(st.committed).length + 1, total: Object.keys(plan.picks).length, noRed, rb, avoid };
 }
 function copyBtn(txt, label) { return '<button class="btn" data-copy="' + esc(txt) + '">⧉ ' + (label || 'Copy') + '</button>'; }
 function renderHUD() {
@@ -1515,7 +1525,9 @@ function renderHUD() {
   if (h.infeasible) { box.innerHTML = '<div class="hero bad"><div class="hval">No feasible timetable</div><p>The seat-full marks or course settings leave no way to place ' + mandTxt() + '. Press <kbd>Backspace</kbd> to undo the last action.</p></div><div class="keys"><button class="keybtn un" data-hud="undo">UNDO<small>Backspace</small></button></div>'; return; }
   const sec = securedCredits();
   const top = '<div class="hudTop"><span>Secured <b>' + fmt(sec) + '</b> cr</span><span>Reachable <b style="color:#34d399">' + fmt(h.plan.credits) + ' / ' + fmt(CAP) + '</b> cr</span>' +
-    (h.plan.approx ? '<span class="flag ov">approximate (search budget hit)</span>' : '') + '<span>' + (h.done ? 'Complete' : 'Step <b>' + h.stepNo + ' / ' + h.total + '</b>') + '</span></div>';
+    (h.plan.approx ? '<span class="flag ov">approximate (search budget hit)</span>' : '') + '<span>' + (h.done ? 'Complete' : 'Step <b>' + h.stepNo + ' / ' + h.total + '</b>') + '</span>' +
+    '<span title="Best timetable that uses no 🔴 blacklisted faculty (sections you already secured are kept)">Max without 🔴 <b style="color:' + (h.noRed ? '#34d399' : '#f87171') + '">' + (h.noRed ? fmt(h.noRed.credits) + ' cr' : 'none possible') + '</b></span>' +
+    (h.noRed ? '<button class="btn" id="hudNoRed" title="Plan and branches skip every 🔴 blacklisted section"' + (PREF.noRed ? ' style="border-color:#34d399;color:#34d399"' : '') + '>' + (PREF.noRed ? '✓ Avoiding 🔴 faculty' : 'Avoid 🔴 faculty') + '</button>' : '') + '</div>';
   if (h.done) {
     box.innerHTML = top + '<div class="hero done"><div class="hlab">DONE</div><div class="hval">✅ All courses secured — ' + fmt(sec) + ' credits</div><p style="color:var(--muted)">Your confirmed timetable is on the right. Press <kbd>Backspace</kbd> to undo, or Reset in View 1 to start over.</p></div>' +
       '<div class="keys"><button class="keybtn un" data-hud="undo">UNDO<small>Backspace</small></button></div>' + seqHTML(h); return;
@@ -1535,7 +1547,7 @@ function renderHUD() {
       '<div class="hrow"><div class="hlab">FACULTY:</div><div class="hval">' + EMO[tagOf(u)] + ' ' + esc(u.faculty) + '</div>' + copyBtn(u.faculty, 'Copy') +
       (overrideFlag(u) ? '<span class="flag ov" style="font-size:12px">[OVERRIDE: PRESERVES CREDITS]</span>' : '') + '</div>' +
       '<div class="hrow"><div class="hlab">SLOTS:</div><div class="hval mono">' + esc(u.slots) + '</div></div>' +
-      '<div class="hrow"><span class="cp">Credits: ' + fmt(u.credits) + '</span><span class="cp">Max if secured: ' + fmt(c.sol.credits) + ' cr</span>' +
+      '<div class="hrow"><span class="cp">Credits: ' + fmt(u.credits) + '</span><span class="cp">Max if secured: ' + fmt(c.sol.credits) + ' cr</span>' + (h.avoid ? '' : (s2 => '<span class="cp" title="Best total if you secure this and avoid every other 🔴 blacklisted faculty">Without 🔴: ' + (s2 ? fmt(s2.credits) + ' cr' : '—') + '</span>')(tagOf(u) === 'b' ? null : solveState(S.state, { [u.ckey]: u.id }, h.rb))) +
       '<span class="cp ' + (la.s === 'ok' || la.s === 'secured' ? 'done' : '') + '">Lookahead: ' + (la.s === 'ok' ? 'all mandatory courses still placeable ✔' : la.s === 'block' ? 'BLOCKS MANDATORY COURSE' : la.s) + '</span>' +
       '<span style="color:var(--muted);font-size:12px">venue (ref only): ' + esc(u.venues.join(' / ')) + '</span></div></div>';
   }
@@ -1571,6 +1583,7 @@ document.addEventListener('click', e => {
   const cp = e.target.closest('[data-copy]');
   if (cp) { copyText(cp.dataset.copy); const o = cp.textContent; cp.textContent = '✓ Copied'; setTimeout(() => { cp.textContent = o; }, 900); return; }
   const hb = e.target.closest('[data-hud]'); if (hb) { hudAction(hb.dataset.hud); return; }
+  if (e.target.closest('#hudNoRed')) { PREF.noRed = !PREF.noRed; S.hudSel = 0; save(); renderHUD(); refreshTT(); toast(PREF.noRed ? 'HUD now skips every 🔴 blacklisted faculty' : 'HUD back to the normal plan (🔴 only when it saves credits)', 'good'); return; }
   const br = e.target.closest('[data-br]'); if (br) { S.hudSel = +br.dataset.br; renderHUD(); refreshTT(); return; }
 });
 function copyText(t) {
