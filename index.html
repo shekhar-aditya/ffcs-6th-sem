@@ -360,7 +360,7 @@ table.lk tr:hover td{background:#111a2e}
     <div class="view" id="view-req">
       <div id="reqPanel">
         <div class="rqHead"><b>Requested faculty</b><span class="note" style="margin:0">Optional — pick teachers you want for some courses. The tree below fits as many as possible, highest priority first.</span>
-          <button class="btn" id="rqToggle" style="margin-left:auto">Hide panel ▴</button></div>
+          <button class="btn" id="rqHud" style="margin-left:auto" title="Register step by step with the requested teachers first (Space / Esc / Backspace, 1–9)">⌨ HUD mode</button><button class="btn" id="rqToggle">Hide panel ▴</button></div>
         <div id="rqBody">
           <div class="rqAdd"><select id="rqCourse"></select><div id="rqFac"></div><button class="btn pri" id="rqAddBtn">＋ Add request</button></div>
           <div id="rqList"></div>
@@ -1052,6 +1052,8 @@ function toast(msg, kind, ms) {
 
 /* ---------- derived helpers ---------- */
 const securedCredits = () => Object.keys(S.state.committed).reduce((s, k) => s + CBY[k].credits, 0);
+/* HUD keys and timetable apply in Live HUD Mode and in View 4's HUD mode (requests honoured there). */
+const hudOn = () => S.view === 'hud' || (S.view === 'req' && S.reqHud);
 function planNow() { return reqOn() ? solveState(S.state, null, REQ.bans) : solveState(S.state); }
 
 /* ===================================================================================
@@ -1204,7 +1206,7 @@ function defaultTTModel() {
   const m = { green, yellow: [], planned: [], red: [] };
   if (plan) {
     const pend = pendingKeys(plan, st).map(k => plan.picks[k]);
-    if (S.view === 'hud') {
+    if (hudOn()) {
       const h = hudModel();
       if (h && h.cur && h.cur.unit) { m.yellow = [h.cur.unit]; m.planned = pend.filter(u => u.id !== h.cur.unit.id); } else m.planned = pend;
     } else m.planned = pend;
@@ -1504,21 +1506,25 @@ function redBans() {
   Object.values(UNITS).forEach(u => { if (tagOf(u) === 'b' && !sec[u.id]) b[u.id] = true; });
   return b;
 }
+const HUD_MAX_OPTS = 60;
 function hudModel() {
   let st = S.state, plan = planNow();
   if (!plan) return { infeasible: true };
   // best plan with no 🔴 faculty at all (null when a mandatory course only has 🔴 sections left)
-  const rb = redBans(), noRed = Object.keys(rb).length ? solveState(st, null, rb) : plan;
+  const rb = redBans(), noRed = Object.keys(rb).length ? solveState(st, null, reqOn() ? Object.assign({}, REQ.bans, rb) : rb) : plan;
   const avoid = PREF.noRed && noRed && noRed !== plan;
   if (avoid) { st = { committed: st.committed, banned: Object.assign({}, st.banned, rb), dropped: st.dropped }; plan = noRed; }
+  if (reqOn()) st = { committed: st.committed, banned: Object.assign({}, st.banned, REQ.bans), dropped: st.dropped };
   const pend = pendingKeys(plan, st);
   const prevCat = S.order.length ? CBY[S.order[S.order.length - 1]].cat : null;
   if (!pend.length) return { done: true, plan, pend, noRed, rb, avoid };
   const u0 = plan.picks[pend[0]];
-  const branches = [{ unit: u0, sol: plan, primary: true }].concat(pivotBranches(st, plan, u0, 2));
+  // every option for this step: the primary, then each fallback in turn (each one assumes the ones before it are full)
+  const branches = [{ unit: u0, sol: plan, primary: true }].concat(pivotBranches(st, plan, u0, HUD_MAX_OPTS));
   const sel = Math.min(S.hudSel, branches.length - 1);
   return { plan, pend, branches, sel, cur: branches[sel], prevCat, stepNo: Object.keys(st.committed).length + 1, total: Object.keys(plan.picks).length, noRed, rb, avoid };
 }
+const rqChip = u => !reqOn() ? '' : reqMatch(u) === 'yes' ? ' <span class="chip rq">★ REQUESTED</span>' : reqMatch(u) === 'no' ? ' <span class="chip rqx">REQUEST DROPPED</span>' : '';
 function copyBtn(txt, label) { return '<button class="btn" data-copy="' + esc(txt) + '">⧉ ' + (label || 'Copy') + '</button>'; }
 function renderHUD() {
   const box = $('#hudBox'), h = hudModel();
@@ -1544,7 +1550,7 @@ function renderHUD() {
     hero = '<div class="hero"><div class="hrow"><div class="hlab">VTOP TAB:</div><div class="hval sm">[' + TAB_NAME[u.cat] + ']</div>' +
       (same ? '<span class="badge same">SAME TAB</span>' : '<span class="badge sw">SWITCH TAB: ' + u.cat + '</span>') + '</div>' +
       '<div class="hrow"><div class="hlab">COURSE:</div><div class="hval">' + esc(theoryCode(u.course)) + ' <small>' + esc(u.course.name) + (u.course.hasLab ? ' (Theory + Lab)' : '') + '</small></div>' + copyBtn(theoryCode(u.course), 'Copy code') + copyBtn(u.course.name, 'Copy name') + '</div>' +
-      '<div class="hrow"><div class="hlab">FACULTY:</div><div class="hval">' + EMO[tagOf(u)] + ' ' + esc(u.faculty) + '</div>' + copyBtn(u.faculty, 'Copy') +
+      '<div class="hrow"><div class="hlab">FACULTY:</div><div class="hval">' + EMO[tagOf(u)] + ' ' + esc(u.faculty) + '</div>' + copyBtn(u.faculty, 'Copy') + rqChip(u) +
       (overrideFlag(u) ? '<span class="flag ov" style="font-size:12px">[OVERRIDE: PRESERVES CREDITS]</span>' : '') + '</div>' +
       '<div class="hrow"><div class="hlab">SLOTS:</div><div class="hval mono">' + esc(u.slots) + '</div></div>' +
       '<div class="hrow"><span class="cp">Credits: ' + fmt(u.credits) + '</span><span class="cp">Max if secured: ' + fmt(c.sol.credits) + ' cr</span>' + (h.avoid ? '' : (s2 => '<span class="cp" title="Best total if you secure this and avoid every other 🔴 blacklisted faculty">Without 🔴: ' + (s2 ? fmt(s2.credits) + ' cr' : '—') + '</span>')(tagOf(u) === 'b' ? null : solveState(S.state, { [u.ckey]: u.id }, h.rb))) +
@@ -1557,7 +1563,7 @@ function renderHUD() {
     if (b.drop) return '<div class="br fb' + on + '" data-br="' + i + '"><span class="k">' + (i + 1) + '</span><b>Skip ' + esc(shortCode(b.course)) + '</b><div style="color:var(--muted);font-size:12px">no substitute · max ' + fmt(b.sol.credits) + ' cr</div></div>';
     const u = b.unit;
     return '<div class="br' + fb + on + '" data-br="' + i + '"><div><span class="k">' + (i + 1) + '</span><b>' + esc(shortCode(u.course)) + '</b> ' + esc(u.course.name) + '</div>' +
-      '<div style="font-size:12px">' + EMO[tagOf(u)] + ' ' + esc(u.faculty) + ' <span class="chip cat">' + u.cat + '</span></div>' +
+      '<div style="font-size:12px">' + EMO[tagOf(u)] + ' ' + esc(u.faculty) + ' <span class="chip cat">' + u.cat + '</span>' + rqChip(u) + (b.reqDrop && reqOn() ? ' <span class="chip rqx">REQUEST DROPPED</span>' : '') + '</div>' +
       '<div class="mono" style="font-size:11px;color:var(--muted)">' + esc(u.slots) + '</div>' +
       '<div class="nc-max' + (b.sol.credits < CAP ? ' low' : '') + '" style="font-size:12px">' + (i ? 'Fallback · ' : 'Primary · ') + 'Max: ' + fmt(b.sol.credits) + ' cr</div></div>';
   }).join('');
@@ -1565,7 +1571,7 @@ function renderHUD() {
     '<div class="keys"><button class="keybtn ok" data-hud="sec">SECURED<small>press <kbd>Space</kbd></small></button>' +
     '<button class="keybtn no" data-hud="full">FULL / PIVOT<small>press <kbd>Esc</kbd></small></button>' +
     '<button class="keybtn un" data-hud="undo">UNDO<small><kbd>Backspace</kbd></small></button></div>' +
-    '<div class="hsec">BRANCHES — press <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> to target a specific one</div><div class="branches">' + brs + '</div>' + seqHTML(h);
+    '<div class="hsec">OPTIONS FOR THIS STEP — ' + h.branches.filter(b => b.unit).length + ' section' + (h.branches.filter(b => b.unit).length === 1 ? '' : 's') + (h.avoid ? ', no 🔴 faculty' : '') + ' · press <kbd>1</kbd>–<kbd>9</kbd> or <kbd>←</kbd> <kbd>→</kbd> to target one · each fallback assumes the ones before it are full</div><div class="branches">' + brs + '</div>' + seqHTML(h);
 }
 function seqHTML(h) {
   const done = S.order.map(k => '<span class="sq done">✓ ' + esc(shortCode(CBY[k])) + '</span>').join('');
@@ -1590,19 +1596,25 @@ function copyText(t) {
   const fb = () => { const a = document.createElement('textarea'); a.value = t; a.style.position = 'fixed'; a.style.opacity = '0'; document.body.appendChild(a); a.select(); try { document.execCommand('copy'); } catch (e) { } a.remove(); };
   try { navigator.clipboard.writeText(t).catch(fb); } catch (e) { fb(); }
 }
-window.addEventListener('keyup', e => { if (S.view === 'hud' && (e.code === 'Space' || e.code === 'Escape')) e.preventDefault(); });
+window.addEventListener('keyup', e => { if (hudOn() && (e.code === 'Space' || e.code === 'Escape')) e.preventDefault(); });
 document.addEventListener('click', e => { const b = e.target.closest('button'); if (b) setTimeout(() => b.blur(), 0); }, true);
 window.addEventListener('keydown', e => {
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
   if (e.key === 'Escape' && $('#modal').classList.contains('on')) { closeCC(); return; }
-  if (S.view !== 'hud' || $('#modal').classList.contains('on')) return;
+  if (!hudOn() || $('#modal').classList.contains('on')) return;
   if (e.code === 'Space') { e.preventDefault(); hudAction('sec'); }
   else if (e.code === 'Escape') { e.preventDefault(); hudAction('full'); }
   else if (e.code === 'Backspace') { e.preventDefault(); hudAction('undo'); }
-  else if (['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'].includes(e.code)) {
+  else if (/^(Digit|Numpad)[1-9]$/.test(e.code)) {
     const i = +e.code.slice(-1) - 1, h = hudModel();
-    if (h && h.branches && i < h.branches.length) { S.hudSel = i; renderHUD(); refreshTT(); } else toast('No branch ' + (i + 1) + ' available');
+    if (h && h.branches && i < h.branches.length) { S.hudSel = i; renderHUD(); refreshTT(); } else toast('No option ' + (i + 1) + ' available');
+  }
+  else if (e.code === 'ArrowRight' || e.code === 'ArrowLeft' || e.code === 'ArrowDown' || e.code === 'ArrowUp') {
+    const h = hudModel(); if (!h || !h.branches) return; e.preventDefault();
+    const d = e.code === 'ArrowRight' || e.code === 'ArrowDown' ? 1 : -1;
+    S.hudSel = (h.sel + d + h.branches.length) % h.branches.length; renderHUD(); refreshTT();
+    const on = document.querySelector('#hudBox .br.on'); if (on) on.scrollIntoView({ block: 'nearest' });
   }
 });
 
@@ -2001,6 +2013,18 @@ $('#rqList').onclick = e => {
   if (a === 'down' && i < W.length - 1) W.splice(i + 1, 0, W.splice(i, 1)[0]);
   recalc('request priority changed');
 };
+/* View 4 HUD mode: the Live HUD panel shown inside View 4, so planning honours the requested teachers. */
+function placeHud() {
+  const inReq = S.view === 'req' && S.reqHud, box = $('#hudBox');
+  (inReq ? $('#reqTreeSlot') : $('#view-hud')).appendChild(box);
+  [$('#view-tree .toolbar') || $('#reqTreeSlot .toolbar'), $('#treeWrap')].forEach(el => { if (el) el.style.display = inReq ? 'none' : ''; });
+  $('#rqHud').textContent = S.reqHud ? '▦ Flowchart' : '⌨ HUD mode';
+}
+$('#rqHud').onclick = () => {
+  S.reqHud = !S.reqHud; S.hudSel = 0; placeHud();
+  if (S.reqHud) renderHUD(); else drawTree(true);
+  refreshTT();
+};
 $('#rqToggle').onclick = () => { const p = $('#reqPanel'); p.classList.toggle('min'); $('#rqToggle').textContent = p.classList.contains('min') ? 'Show panel ▾' : 'Hide panel ▴'; };
 
 function setView(v) {
@@ -2017,10 +2041,11 @@ function setView(v) {
   }
   document.querySelectorAll('#tabs .tab[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === v));
   document.querySelectorAll('.view').forEach(el => el.classList.toggle('on', el.id === 'view-' + v));
-  if (v === 'tree' || v === 'req') { drawTree(!ZOOM || ZT === d3.zoomIdentity || (v === 'req') !== (was === 'req')); }
+  if (v === 'tree' || (v === 'req' && !S.reqHud)) { drawTree(!ZOOM || ZT === d3.zoomIdentity || (v === 'req') !== (was === 'req')); }
   if (v === 'req') renderReqPanel();
   if (v === 'cat') showCatalog();
-  if (v === 'hud') renderHUD();
+  placeHud();
+  if (hudOn()) renderHUD();
   refreshTT();
 }
 document.querySelectorAll('#tabs .tab[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
@@ -2067,9 +2092,9 @@ function recalc(why) {
   S.cat.dirty = true; S.selNode = null; REQ.stats = null;
   if (S.view === 'req') computeReq(); else REQ.dirty = true;
   TREE_ROOT = buildTree();
-  if (S.view === 'tree' || S.view === 'req') drawTree(why === 'init' || why === 'session reset');
+  if (S.view === 'tree' || (S.view === 'req' && !S.reqHud)) drawTree(why === 'init' || why === 'session reset');
   if (S.view === 'req') renderReqPanel();
-  if (S.view === 'hud') renderHUD();
+  if (hudOn()) renderHUD();
   if (S.view === 'cat') showCatalog();
   refreshTT(); save();
   S.lastMs = performance.now() - t;
